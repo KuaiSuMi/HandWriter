@@ -4,26 +4,15 @@ export function createProject(overrides = {}) {
   return {
     version: PROJECT_VERSION,
     id: crypto.randomUUID(),
-    width: 1000,
-    height: 680,
-    background: null,
+    canvas: { width: 1000, height: 680 },
+    background: {
+      sourceName: null,
+      fit: 'contain',
+      opacity: 1,
+    },
     textBlocks: [],
     freeGlyphs: [],
     ...overrides,
-  };
-}
-
-export function createBackground({ src, x = 0, y = 0, width, height, rotation = 0, opacity = 1 }) {
-  return {
-    id: crypto.randomUUID(),
-    type: 'background',
-    src,
-    x,
-    y,
-    width,
-    height,
-    rotation,
-    opacity,
   };
 }
 
@@ -37,11 +26,12 @@ export function createTextBlock(overrides = {}) {
     rotation: 0,
     text: '',
     fontSize: 58,
-    lineHeight: 1.55,
+    lineHeight: 1.5,
     letterSpacing: 0,
     align: 'left',
-    fill: '#161616',
+    color: '#161616',
     thickness: 0.3,
+    penStyle: 'gel',
     warpStrength: 0.018,
     diversity: 0.65,
     glyphs: [],
@@ -49,11 +39,11 @@ export function createTextBlock(overrides = {}) {
   };
 }
 
-export function createGlyphInstance(overrides = {}) {
+export function createGlyphInstance(char = '', overrides = {}) {
   return {
     id: crypto.randomUUID(),
     type: 'glyph',
-    char: '',
+    char,
     glyphIndex: 0,
     x: 0,
     y: 0,
@@ -61,7 +51,7 @@ export function createGlyphInstance(overrides = {}) {
     scaleX: 1,
     scaleY: 1,
     fontSize: 58,
-    fill: '#161616',
+    color: '#161616',
     thickness: 0.3,
     variantSeed: 0,
     warpStrength: 0.018,
@@ -80,7 +70,7 @@ export function parseProject(json) {
     throw new Error('Invalid HandWriter project');
   }
   if (project.version !== PROJECT_VERSION) {
-    throw new Error(`Unsupported HandWriter project version: ${project.version}`);
+    throw new Error(`Unsupported HandWriter project version: ${project.version ?? 'unknown'}`);
   }
   return project;
 }
