@@ -5,55 +5,29 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>HandWriter Editor v0.2</title>
   <style>
-    *{box-sizing:border-box}body{margin:0;background:#efefec;color:#171717;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}.app{width:min(1440px,calc(100vw - 32px));margin:16px auto}.top{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:14px}.top h1{margin:0;font-size:28px}.top p{margin:4px 0 0;color:#717171;font-size:13px}.badge{font-size:12px;padding:6px 10px;border-radius:999px;background:#1f1f1f;color:#fff}.workspace{display:grid;grid-template-columns:280px minmax(0,1fr);gap:14px}.panel{background:#fff;border:1px solid #dcdcd7;border-radius:12px;padding:15px;height:max-content}.panel h2{font-size:14px;margin:0 0 13px}.field{display:grid;gap:6px;margin-bottom:14px}.field label{font-size:12px;font-weight:700}.field small{font-size:11px;color:#777;line-height:1.45}.field input[type=file],.field select{width:100%}.field select,.button{height:38px;border:1px solid #d4d4cf;border-radius:8px;background:#fff;padding:0 10px}.field input[type=range]{width:100%}.button{display:flex;align-items:center;justify-content:center;cursor:pointer;font-weight:700}.button.dark{background:#202020;color:#fff;border-color:#202020}.canvas-wrap{background:#d7d7d2;border:1px solid #ccccC7;border-radius:12px;padding:20px;min-height:730px;overflow:auto}.paper{width:1000px;height:680px;margin:auto;background:#fff;box-shadow:0 3px 20px rgba(0,0,0,.12);position:relative}.paper canvas{display:block;width:1000px;height:680px}.empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;color:#777;font-size:13px}.status{font-size:12px;line-height:1.5;padding:10px;border-radius:8px;background:#f5f5f2;color:#555;word-break:break-all}.links{display:grid;gap:8px;margin-top:12px}.links a{font-size:12px;color:#333}.note{font-size:11px;color:#858585;line-height:1.55;margin-top:10px}
+    *{box-sizing:border-box}body{margin:0;background:#efefec;color:#171717;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}.app{width:min(1440px,calc(100vw - 32px));margin:16px auto}.top{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:14px}.top h1{margin:0;font-size:28px}.top p{margin:4px 0 0;color:#717171;font-size:13px}.badge{font-size:12px;padding:6px 10px;border-radius:999px;background:#1f1f1f;color:#fff}.workspace{display:grid;grid-template-columns:280px minmax(0,1fr);gap:14px}.panel{background:#fff;border:1px solid #dcdcd7;border-radius:12px;padding:15px;height:max-content}.panel h2{font-size:14px;margin:0 0 13px}.field{display:grid;gap:6px;margin-bottom:14px}.field label{font-size:12px;font-weight:700}.field small{font-size:11px;color:#777;line-height:1.45}.field input[type=file],.field select{width:100%}.field select,.button{height:38px;border:1px solid #d4d4cf;border-radius:8px;background:#fff;padding:0 10px}.field input[type=range]{width:100%}.button{display:flex;align-items:center;justify-content:center;cursor:pointer;font-weight:700}.canvas-wrap{background:#d7d7d2;border:1px solid #ccccC7;border-radius:12px;padding:20px;min-height:730px;overflow:auto}.paper{width:1000px;height:680px;margin:auto;background:#fff;box-shadow:0 3px 20px rgba(0,0,0,.12);position:relative}.paper canvas{display:block;width:1000px;height:680px}.empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;color:#777;font-size:13px}.status{font-size:12px;line-height:1.5;padding:10px;border-radius:8px;background:#f5f5f2;color:#555;word-break:break-all}.links{display:grid;gap:8px;margin-top:12px}.links a{font-size:12px;color:#333}.note{font-size:11px;color:#858585;line-height:1.55;margin-top:10px}
   </style>
 </head>
 <body>
 <div class="app">
-  <header class="top">
-    <div><h1>HandWriter Editor</h1><p>v0.2 第一阶段：背景图片层。稳定 MVP 保留在 standalone.html。</p></div>
-    <span class="badge">feature/editor-v0.2</span>
-  </header>
-
+  <header class="top"><div><h1>HandWriter Editor</h1><p>v0.2 第一阶段：背景图片层。稳定 MVP 保留在 standalone.html。</p></div><span class="badge">feature/editor-v0.2</span></header>
   <main class="workspace">
     <aside class="panel">
       <h2>背景图片</h2>
-      <div class="field">
-        <label for="backgroundInput">上传纸张 / 照片</label>
-        <input id="backgroundInput" type="file" accept="image/*" />
-        <small>图片只在浏览器本地读取，不上传服务器。</small>
-      </div>
-      <div class="field">
-        <label for="fitSelect">适配方式</label>
-        <select id="fitSelect">
-          <option value="contain">完整显示</option>
-          <option value="cover">铺满裁切</option>
-          <option value="stretch">拉伸铺满</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="opacityRange">背景透明度 <span id="opacityText">100%</span></label>
-        <input id="opacityRange" type="range" min="0" max="1" step="0.01" value="1" />
-      </div>
+      <div class="field"><label for="backgroundInput">上传纸张 / 照片</label><input id="backgroundInput" type="file" accept="image/*" /><small>图片只在浏览器本地读取，不上传服务器。</small></div>
+      <div class="field"><label for="fitSelect">适配方式</label><select id="fitSelect"><option value="contain">完整显示</option><option value="cover">铺满裁切</option><option value="stretch">拉伸铺满</option></select></div>
+      <div class="field"><label for="opacityRange">背景透明度 <span id="opacityText">100%</span></label><input id="opacityRange" type="range" min="0" max="1" step="0.01" value="1" /></div>
       <button id="clearButton" class="button">清除背景</button>
       <div id="status" class="status">尚未加载背景图片。</div>
-      <div class="links">
-        <a href="./standalone.html">打开稳定 MVP</a>
-      </div>
+      <div class="links"><a href="./standalone.html">打开稳定 MVP</a></div>
       <p class="note">下一步会在同一画布上加入 TextBlock，并把现有 Variant Engine 接入 Glyph 层。</p>
     </aside>
-
-    <section class="canvas-wrap">
-      <div class="paper">
-        <canvas id="canvas" width="1000" height="680"></canvas>
-        <div id="emptyHint" class="empty">上传一张纸张或照片作为背景</div>
-      </div>
-    </section>
+    <section class="canvas-wrap"><div class="paper"><canvas id="canvas" width="1000" height="680"></canvas><div id="emptyHint" class="empty">上传一张纸张或照片作为背景</div></div></section>
   </main>
 </div>
-
 <script type="module">
   import { BackgroundLayer } from './src/editor/background.js';
+  import { createProject } from './src/editor/model.js';
 
   const canvas = document.getElementById('canvas');
   const input = document.getElementById('backgroundInput');
@@ -63,36 +37,25 @@
   const clearButton = document.getElementById('clearButton');
   const status = document.getElementById('status');
   const emptyHint = document.getElementById('emptyHint');
+  const project = createProject();
 
   const layer = new BackgroundLayer(canvas, state => {
+    project.background = { sourceName: state.sourceName, fit: state.fit, opacity: state.opacity };
     layer.draw();
     emptyHint.style.display = state.hasImage ? 'none' : 'flex';
-    status.textContent = state.hasImage
-      ? `背景：${state.sourceName} · ${state.fit} · ${Math.round(state.opacity * 100)}%`
-      : '尚未加载背景图片。';
+    status.textContent = state.hasImage ? `背景：${state.sourceName} · ${state.fit} · ${Math.round(state.opacity * 100)}%` : '尚未加载背景图片。';
   });
 
   layer.draw();
-
   input.addEventListener('change', async () => {
     const file = input.files?.[0];
     if (!file) return;
-    try {
-      await layer.loadFile(file);
-    } catch (error) {
-      status.textContent = error instanceof Error ? error.message : String(error);
-    }
+    try { await layer.loadFile(file); }
+    catch (error) { status.textContent = error instanceof Error ? error.message : String(error); }
   });
-
   fit.addEventListener('change', () => layer.setFit(fit.value));
-  opacity.addEventListener('input', () => {
-    opacityText.textContent = `${Math.round(Number(opacity.value) * 100)}%`;
-    layer.setOpacity(opacity.value);
-  });
-  clearButton.addEventListener('click', () => {
-    input.value = '';
-    layer.clear();
-  });
+  opacity.addEventListener('input', () => { opacityText.textContent = `${Math.round(Number(opacity.value) * 100)}%`; layer.setOpacity(opacity.value); });
+  clearButton.addEventListener('click', () => { input.value = ''; layer.clear(); });
   window.addEventListener('beforeunload', () => layer.destroy());
 </script>
 </body>
