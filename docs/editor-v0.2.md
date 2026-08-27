@@ -4,23 +4,36 @@
 
 Turn the validated handwriting Variant Engine MVP into an editable handwriting document editor.
 
-## Scope
+## Baseline
 
-### 1. Document model
+The validated MVP remains available as `standalone.html` on `main`. New editor functionality is developed separately so the working MVP is not broken during migration.
 
-The editor no longer treats the page as a single bitmap. A project contains editable objects:
+## Architecture
 
 ```text
 Document
-├── Background
+├── BackgroundLayer
 ├── TextBlock[]
 │   └── GlyphInstance[]
 └── FreeGlyph[]
 ```
 
-### 2. TextBlock
+### BackgroundLayer
 
-A TextBlock owns paragraph-level layout properties:
+Implemented in the current branch:
+
+- local image upload
+- `contain / cover / stretch` fit modes
+- opacity control
+- clear background
+- object URL lifecycle cleanup
+- serializable background metadata
+
+The selected image stays in the browser in this prototype.
+
+### TextBlock
+
+Planned paragraph-level properties:
 
 - x / y
 - width
@@ -32,62 +45,46 @@ A TextBlock owns paragraph-level layout properties:
 - default color
 - default pen style
 
-TextBlocks can be moved and rotated as a whole. Individual glyphs remain independently editable.
+TextBlocks will move and rotate as a whole while glyphs remain independently editable.
 
-### 3. GlyphInstance
+### GlyphInstance
 
-Each character remains a first-class object so the current MVP capabilities are preserved:
+The existing MVP capabilities will be preserved:
 
 - deterministic `variantSeed`
 - non-rigid glyph deformation
 - six candidate variants
 - per-character x / y / rotation
-- per-character scale
-- color
-- thickness
-- size
+- scale, color, thickness and size
 
-### 4. Background
-
-The editor will support an optional image background. The first implementation only places and transforms the image; paper/ink fusion is reserved for a later version.
-
-### 5. Editing interactions
-
-Target interactions for v0.2:
+## Editing target
 
 - double-click empty canvas to create a TextBlock
 - click TextBlock to select it
 - double-click TextBlock to enter text editing mode
 - click a glyph to enter glyph editing mode
 - Shift/Ctrl/Cmd multi-select glyphs
-- drag selected objects
-- rotate selected objects
-- duplicate/delete selected objects
-- undo/redo
+- drag / rotate selected objects
+- duplicate / delete
+- undo / redo
 
-### 6. Project persistence
+## Project persistence
 
-Projects are serializable JSON. Generated geometry is reproducible from source text, style fields and seeds instead of storing a flattened bitmap.
+Projects will be serializable JSON. Generated geometry should be reproducible from source text, styles and seeds rather than storing only a flattened bitmap.
 
-## Non-goals for v0.2
-
-- AI handwriting learning
-- stroke trajectory reconstruction
-- pen-pressure simulation
-- realistic paper/ink compositing
-- accounts/cloud sync
-- collaboration
-
-## Milestones
+## Implementation order
 
 1. Project data model and serialization
-2. Background layer
-3. TextBlock creation and editing
-4. Glyph/TextBlock mode switching
-5. Alignment/copy/delete tools
-6. Save/load project JSON
-7. PNG export regression test
+2. Background layer — **in progress / first prototype implemented**
+3. Arbitrary-position TextBlock creation
+4. TextBlock selection / drag / rotation
+5. Port Variant Engine into Glyph children
+6. Glyph/TextBlock mode switching
+7. Alignment / copy / delete tools
+8. Save/load project JSON
+9. PNG export regression
+10. Ink-paper fusion
 
 ## Architecture rule
 
-Do not permanently group selected glyphs in the data model. Selection is temporary editor state. This keeps glyphs individually addressable and prevents group transforms from destroying per-character editability.
+Do not permanently group selected glyphs in the data model. Selection is temporary editor state so every glyph remains independently addressable.
