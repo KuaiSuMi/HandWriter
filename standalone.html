@@ -26,6 +26,7 @@
       <span id="fontName" class="fontname">正在加载云烟体…</span>
     </div>
   </div>
+
   <section class="controls">
     <textarea id="textInput" rows="3">今天下午我们一起去图书馆学习。
 同一个字，也应该有细微不同。</textarea>
@@ -36,6 +37,7 @@
       <button id="generateBtn" class="primary" disabled>生成文字</button>
     </div>
   </section>
+
   <section class="workspace">
     <div class="canvasWrap">
       <div id="placeholder" class="placeholder"><strong>正在加载 handwriting-web 预设字体</strong><span>网络加载失败时仍可选择本地字体。</span></div>
@@ -49,9 +51,18 @@
       <section class="sec">
         <div class="head"><h2>属性</h2><span id="styleScope">未选择</span></div>
         <div class="propPanel">
-          <div class="field"><label for="colorInput">颜色 <span class="sub" id="colorText">#161616</span></label><input id="colorInput" type="color" value="#161616"></div>
-          <div class="field"><label for="thicknessInput">粗细 <span class="sub" id="thicknessText">0.30px</span></label><input id="thicknessInput" type="range" min="0" max="3" step="0.05" value="0.30"></div>
-          <div class="field"><label for="sizeInput">所选字号 <span class="sub" id="sizeText">58px</span></label><input id="sizeInput" type="range" min="24" max="120" step="1" value="58"></div>
+          <div class="field">
+            <label for="colorInput">颜色 <span class="sub" id="colorText">#161616</span></label>
+            <input id="colorInput" type="color" value="#161616">
+          </div>
+          <div class="field">
+            <label for="thicknessInput">粗细 <span class="sub" id="thicknessText">0.30px</span></label>
+            <input id="thicknessInput" type="range" min="0" max="3" step="0.05" value="0.30">
+          </div>
+          <div class="field">
+            <label for="sizeInput">所选字号 <span class="sub" id="sizeText">58px</span></label>
+            <input id="sizeInput" type="range" min="24" max="120" step="1" value="58">
+          </div>
           <div class="meta"><span>多选时会批量应用到所选字符</span><span id="styleHint">先选择字符</span></div>
           <button id="applyStyleBtn" class="secondary apply" disabled>应用到所选字符</button>
         </div>
@@ -61,7 +72,10 @@
         <div id="candidateArea" class="muted">单选字符后生成 6 个候选。</div>
       </section>
       <section class="sec actions">
-        <button id="undoBtn" disabled>撤销</button><button id="redoBtn" disabled>重做</button><button id="deleteBtn" disabled>删除选择</button><button id="exportBtn" class="export" disabled>导出 PNG</button>
+        <button id="undoBtn" disabled>撤销</button>
+        <button id="redoBtn" disabled>重做</button>
+        <button id="deleteBtn" disabled>删除选择</button>
+        <button id="exportBtn" class="export" disabled>导出 PNG</button>
       </section>
     </aside>
   </section>
