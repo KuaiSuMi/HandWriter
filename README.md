@@ -21,39 +21,14 @@
 - 侧栏支持对所选字符批量编辑颜色、粗细、大小等属性
 - 单击选择、Shift/Ctrl/Cmd 多选、空白框选
 - 多选整体拖动
-- 多选整体旋转（React 版使用 Konva Transformer；standalone 版实现等价交互）
+- 多选整体旋转
 - Delete 删除
 - Undo / Redo
 - PNG 导出
 
-## handwriting-web 字体
+## 运行
 
-预设来源为 `14790897/handwriting-web` 仓库根目录下的 `ttf_files`：
-
-- `云烟体.ttf`
-- `华阳手写体.ttf`
-- `李国夫手写体.ttf`
-- `神韵英子楷书.ttf`
-- `青叶手写体.ttf`
-
-当前执行环境无法直接把这些较大的 GitHub 二进制字体下载进生成的 ZIP，因此工程采用“本地优先、CDN 回退”的方式集成：用户打开页面后会自动获取字体，不需要手动导入。
-
-如果需要**完全离线**：把上述 5 个 `.ttf` 放入 `fonts/` 目录即可，现有代码会优先加载它们，无需改代码。
-
-> 许可提醒：handwriting-web 仓库本身使用 MIT License，但仓库许可证不必然代表其中每一份第三方字体均允许商业再分发。商业使用前应单独确认字体原始许可。
-
-## React / Vite 版运行
-
-```bash
-npm install
-npm run dev
-```
-
-打开页面后会自动尝试加载“云烟体”。可以用右上角下拉菜单切换 5 个预设字体，也可以选择本地字体。
-
-## 零构建版
-
-`standalone.html` 用于最快验证算法/交互：
+最直接的入口是 `standalone.html`。推荐通过本地 HTTP 服务打开：
 
 ```bash
 python -m http.server 8080
@@ -65,21 +40,33 @@ python -m http.server 8080
 http://localhost:8080/standalone.html
 ```
 
-由于浏览器对 `file://` 下 `fetch()` 有限制，请通过本地 HTTP 服务打开，而不是直接双击 HTML。
+根目录 `index.html` 会自动跳转到 standalone MVP。
+
+## handwriting-web 字体
+
+预设来源为 `14790897/handwriting-web` 仓库根目录下的 `ttf_files`：
+
+- `云烟体.ttf`
+- `华阳手写体.ttf`
+- `李国夫手写体.ttf`
+- `神韵英子楷书.ttf`
+- `青叶手写体.ttf`
+
+当前采用“本地优先、CDN 回退”的方式集成。如果需要完全离线，可将对应字体文件放进 `fonts/` 目录。
+
+> 商业使用前应单独确认每份字体的原始许可。
 
 ## 关键参数
 
-默认 `warpStrength = 0.018`，即扰动幅度约为字号的 1.8%。建议验证范围：`0.010–0.024`。另提供“重复字差异”滑块，用于增强同字不同形的默认随机差异。
+默认 `warpStrength = 0.018`，建议验证范围：`0.010–0.024`。另提供“重复字差异”滑块，用于增强同字不同形的默认随机差异。
 
-## 当前算法边界
+## 下一阶段：Editor v0.2
 
-MVP 直接对 OpenType Bézier 的端点/控制点施加同一平滑 deformation field。严格数学意义上，这不等价于对完整 Bézier 曲线做非线性映射，但在小幅平滑扰动下适合产品验证。
+MVP 已通过验证，后续开发进入编辑器化阶段：
 
-下一步可加入：
-
-- 曲线自适应 subdivision 后再 warp
-- 轮廓自交/笔画碰撞检测
-- 64×64 mask IoU/SSIM 候选过滤
-- 基于部件/笔画的结构约束
-- Web Worker 预生成候选
-- 实拍纸张与墨迹融合
+- 背景图片层
+- 任意位置 TextBlock
+- TextBlock / Glyph 两级编辑
+- 项目 JSON 保存与恢复
+- 复制、删除、对齐、层级管理
+- 墨迹与纸张融合
