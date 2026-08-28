@@ -140,6 +140,22 @@
     return multiSelectionBox;
   }
 
+  function getTextboxRenderBox(tb) {
+    return { cx: tb.x + tb.width / 2, cy: tb.y + tb.height / 2, w: tb.width, h: tb.height, angle: (tb.rotation || 0) * Math.PI / 180 };
+  }
+
+  function applyTextboxRotation(tb) {
+    const box = getTextboxRenderBox(tb);
+    const angleDeg = tb.rotation || 0;
+    const angle = angleDeg * Math.PI / 180;
+    const baseList = (tb.basePreviewGlyphs || []).map(g => createGlyphObject({ ...g, id: g.id }));
+    tb.previewGlyphs = baseList.map(src => {
+      const q = Core.rotatePoint(src.x, src.y, box.cx, box.cy, angle);
+      return createGlyphObject({ ...src, id: src.id, x: q.x, y: q.y, rotation: (src.rotation || 0) + angleDeg });
+    });
+    return tb;
+  }
+
   function textboxInnerRect(tb) {
     return { x: tb.x + tb.padding + tb.offsetX, y: tb.y + tb.padding + tb.offsetY, w: Math.max(10, tb.width - tb.padding * 2), h: Math.max(10, tb.height - tb.padding * 2) };
   }
@@ -198,8 +214,9 @@
       }));
       x += adv; idx++;
     }
-    tb.previewGlyphs = Core.normalizeGlyphTop(font, result, tb.y + tb.padding + tb.offsetY);
+    tb.basePreviewGlyphs = Core.normalizeGlyphTop(font, result, tb.y + tb.padding + tb.offsetY).map(g => createGlyphObject({ ...g, id: g.id }));
     tb.overflowCount = overflowCount;
+    applyTextboxRotation(tb);
     return tb;
   }
 
@@ -208,8 +225,8 @@
       id: nextId('tb'), x: rect.x, y: rect.y,
       width: Math.max(120, rect.w), height: Math.max(80, rect.h), text: els.textInput.value,
       fontSize: +els.fontSize.value, warpStrength: +els.strength.value, diversity: +els.diversity.value,
-      padding: 16, charGap: 0, lineGap: 1.55, offsetX: 0, offsetY: 0,
-      previewGlyphs: [], overflowCount: 0
+      padding: 16, charGap: 0, lineGap: 1.55, offsetX: 0, offsetY: 0, rotation: 0,
+      basePreviewGlyphs: [], previewGlyphs: [], overflowCount: 0
     };
     return layoutTextbox(tb);
   }
@@ -266,28 +283,7 @@
   }
 
   function drawNoise() {
-    const noise = doc.noise;
-    if (!noise.amount) return;
-    const rng = Core.mulberry32(noise.seed || 305419896);
-    const size = Math.max(1, noise.size | 0);
-    const step = size;
-    const density = 0.08 + noise.amount * 0.22;
-    ctx.save();
-    for (let y = 0; y < doc.height; y += step) {
-      for (let x = 0; x < doc.width; x += step) {
-        if (rng() > density) continue;
-        const a = 0.015 + rng() * noise.amount * 0.09;
-        if (noise.colorful) {
-          const r = 110 + rng() * 120, g = 110 + rng() * 120, b = 110 + rng() * 120;
-          ctx.fillStyle = `rgba(${r|0},${g|0},${b|0},${a})`;
-        } else {
-          const v = 90 + rng() * 120;
-          ctx.fillStyle = `rgba(${v|0},${v|0},${v|0},${a})`;
-        }
-        ctx.fillRect(x, y, step, step);
-      }
-    }
-    ctx.restore();
+    // Global canvas noise is intentionally disabled. Noise is applied to glyphs only.
   }
 
   function drawInkTexture(g) {
@@ -340,6 +336,54 @@
     ctx.restore();
   }
 
+  function drawGlyphBlendNoise(g) {
+    const noise = doc.noise;
+    if (!noise.amount) return;
+    const amount = noise.amount;
+    const size = Math.max(1, noise.size | 0);
+    const seed = Core.mixSeed(noise.seed || 305419896, g.inkSeed || g.variantSeed, g.char.charCodeAt(0));
+    const rng = Core.mulberry32(seed);
+    const baseHex = g.fill || DEFAULT_COLOR;
+    const baseRgb = Core.hexToRgb(baseHex);
+
+    const fuzzPasses = 1 + Math.round(amount * 4 + size * 0.4);
+    for (let i = 0; i < fuzzPasses; i++) {
+      const dx = (rng() - 0.5) * size * (0.5 + amount);
+      const dy = (rng() - 0.5) * size * (0.5 + amount);
+      const delta = (rng() - 0.5) * (noise.colorful ? 40 : 22);
+      ctx.save();
+      ctx.translate(dx, dy);
+      ctx.globalAlpha = 0.025 + amount * 0.05;
+      ctx.fillStyle = Core.rgbaString(noise.colorful ? { r: baseRgb.r + delta, g: baseRgb.g - delta * 0.25, b: baseRgb.b + delta * 0.6 } : Core.hexToRgb(Core.offsetColor(baseHex, delta)), 1);
+      ctx.fill(g.geo.path);
+      ctx.restore();
+    }
+
+    ctx.save();
+    ctx.clip(g.geo.path);
+    const speckles = Math.max(10, Math.round((g.geo.width * g.geo.height / 1800) * (0.4 + amount * 1.8)));
+    for (let i = 0; i < speckles; i++) {
+      const x = rng() * g.geo.width, y = rng() * g.geo.height;
+      const r = (0.15 + rng() * 0.75) * size;
+      const delta = (rng() - 0.5) * (noise.colorful ? 48 : 26);
+      ctx.beginPath();
+      ctx.fillStyle = Core.rgbaString(noise.colorful ? { r: baseRgb.r + delta, g: baseRgb.g + delta * 0.2, b: baseRgb.b - delta * 0.35 } : Core.hexToRgb(Core.offsetColor(baseHex, delta)), 0.035 + rng() * (0.06 + amount * 0.06));
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalAlpha = 0.03 + amount * 0.08;
+    ctx.lineWidth = Math.max(0.35, (g.strokeWidth || 0.1) + size * 0.35);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    const edgeDelta = (rng() - 0.5) * (noise.colorful ? 38 : 20);
+    ctx.strokeStyle = Core.rgbaString(noise.colorful ? { r: baseRgb.r + edgeDelta, g: baseRgb.g - edgeDelta * 0.2, b: baseRgb.b + edgeDelta * 0.25 } : Core.hexToRgb(Core.offsetColor(baseHex, edgeDelta)), 1);
+    ctx.stroke(g.geo.path);
+    ctx.restore();
+  }
+
   function drawGlyph(g) {
     Core.ensureGeo(font, g);
     ctx.save();
@@ -350,6 +394,7 @@
     ctx.fillStyle = g.fill || DEFAULT_COLOR;
     ctx.fill(g.geo.path);
     drawInkTexture(g);
+    drawGlyphBlendNoise(g);
     if ((g.strokeWidth || 0) > 0.001) {
       ctx.strokeStyle = g.fill || DEFAULT_COLOR;
       ctx.lineWidth = g.strokeWidth;
@@ -388,27 +433,48 @@
   }
 
   function textboxHandles(tb) {
-    return [
-      { kind: 'nw', x: tb.x, y: tb.y },
-      { kind: 'ne', x: tb.x + tb.width, y: tb.y },
-      { kind: 'sw', x: tb.x, y: tb.y + tb.height },
-      { kind: 'se', x: tb.x + tb.width, y: tb.y + tb.height },
-      { kind: 'rotate', x: tb.x + tb.width / 2, y: tb.y - ROTATE_OFFSET }
+    const box = getTextboxRenderBox(tb);
+    const locals = [
+      { kind: 'nw', x: box.cx - box.w / 2, y: box.cy - box.h / 2 },
+      { kind: 'ne', x: box.cx + box.w / 2, y: box.cy - box.h / 2 },
+      { kind: 'sw', x: box.cx - box.w / 2, y: box.cy + box.h / 2 },
+      { kind: 'se', x: box.cx + box.w / 2, y: box.cy + box.h / 2 },
+      { kind: 'rotate', x: box.cx, y: box.cy - box.h / 2 - ROTATE_OFFSET }
     ];
+    return locals.map(h => ({ ...h, ...Core.rotatePoint(h.x, h.y, box.cx, box.cy, box.angle) }));
+  }
+
+  function drawRotatedRect(box, strokeStyle, dash) {
+    const corners = Core.rotatedRectCorners(box);
+    ctx.save();
+    ctx.strokeStyle = strokeStyle;
+    ctx.setLineDash(dash || []);
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(corners[0].x, corners[0].y);
+    for (let i = 1; i < corners.length; i++) ctx.lineTo(corners[i].x, corners[i].y);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
   }
 
   function drawTextboxHandles(tb) {
     const handles = textboxHandles(tb);
+    const box = getTextboxRenderBox(tb);
+    const topMid = Core.rotatePoint(box.cx, box.cy - box.h / 2, box.cx, box.cy, box.angle);
+    const rotateHandle = handles.find(h => h.kind === 'rotate');
     ctx.save();
     ctx.fillStyle = '#fff';
     ctx.strokeStyle = '#111';
     ctx.lineWidth = 1.2;
+    if (rotateHandle) {
+      ctx.beginPath();
+      ctx.moveTo(topMid.x, topMid.y);
+      ctx.lineTo(rotateHandle.x, rotateHandle.y);
+      ctx.stroke();
+    }
     for (const h of handles) {
       if (h.kind === 'rotate') {
-        ctx.beginPath();
-        ctx.moveTo(tb.x + tb.width / 2, tb.y);
-        ctx.lineTo(h.x, h.y + HANDLE_VISUAL / 2);
-        ctx.stroke();
         ctx.beginPath();
         ctx.arc(h.x, h.y, HANDLE_VISUAL / 2, 0, Math.PI * 2);
         ctx.fill();
@@ -422,12 +488,7 @@
   }
 
   function drawDraftTextbox(tb) {
-    ctx.save();
-    ctx.strokeStyle = tb.id === selectedTextboxId ? 'rgba(34,34,34,.8)' : 'rgba(0,0,0,.22)';
-    ctx.setLineDash(tb.id === selectedTextboxId ? [8, 4] : [5, 4]);
-    ctx.lineWidth = 1.2;
-    ctx.strokeRect(tb.x, tb.y, tb.width, tb.height);
-    ctx.restore();
+    drawRotatedRect(getTextboxRenderBox(tb), tb.id === selectedTextboxId ? 'rgba(34,34,34,.8)' : 'rgba(0,0,0,.22)', tb.id === selectedTextboxId ? [8, 4] : [5, 4]);
     for (const g of tb.previewGlyphs) drawGlyph(g);
     if (tb.id === selectedTextboxId) drawTextboxHandles(tb);
   }
@@ -499,7 +560,7 @@
   function hitDraftTextbox(p) {
     for (let i = doc.draftTextboxes.length - 1; i >= 0; i--) {
       const tb = doc.draftTextboxes[i];
-      if (Core.pointInRect(p, { x: tb.x, y: tb.y, w: tb.width, h: tb.height })) return tb;
+      if (Core.pointInRotatedRect(p, getTextboxRenderBox(tb))) return tb;
     }
     return null;
   }
@@ -772,14 +833,16 @@
       const handle = hitTextboxHandle(tb, p);
       if (handle) {
         snapshot();
+        const box = getTextboxRenderBox(tb);
         interaction = { mode: handle.kind === 'rotate' ? 'rotateTextbox' : 'resizeTextbox', handle, start: p, textboxId: tb.id,
-          orig: { x: tb.x, y: tb.y, w: tb.width, h: tb.height }, center: { x: tb.x + tb.width / 2, y: tb.y + tb.height / 2 },
-          startAngle: Math.atan2(p.y - (tb.y + tb.height / 2), p.x - (tb.x + tb.width / 2)), glyphSnapshot: tb.previewGlyphs.map(g => ({ ...g })) };
+          orig: { x: tb.x, y: tb.y, w: tb.width, h: tb.height }, origRotation: tb.rotation || 0, center: { x: box.cx, y: box.cy }, boxAngle: box.angle,
+          startAngle: Math.atan2(p.y - box.cy, p.x - box.cx) };
         return;
       }
-      if (Core.pointInRect(p, { x: tb.x, y: tb.y, w: tb.width, h: tb.height })) {
+      if (Core.pointInRotatedRect(p, getTextboxRenderBox(tb))) {
         snapshot();
-        interaction = { mode: 'moveTextbox', start: p, textboxId: tb.id, orig: { x: tb.x, y: tb.y }, glyphSnapshot: tb.previewGlyphs.map(g => ({ id: g.id, x: g.x, y: g.y })) };
+        interaction = { mode: 'moveTextbox', start: p, textboxId: tb.id, orig: { x: tb.x, y: tb.y },
+          glyphSnapshot: tb.previewGlyphs.map(g => ({ id: g.id, x: g.x, y: g.y })), baseGlyphSnapshot: (tb.basePreviewGlyphs || []).map(g => ({ id: g.id, x: g.x, y: g.y })) };
         draw(); return;
       }
     }
@@ -836,26 +899,28 @@
       for (const s of interaction.glyphSnapshot) {
         const g = tb.previewGlyphs.find(x => x.id === s.id); if (g) { g.x = s.x + dx; g.y = s.y + dy; }
       }
+      for (const s of interaction.baseGlyphSnapshot || []) {
+        const g = (tb.basePreviewGlyphs || []).find(x => x.id === s.id); if (g) { g.x = s.x + dx; g.y = s.y + dy; }
+      }
       draw(); syncUI(); return;
     }
     if (interaction.mode === 'resizeTextbox') {
       const tb = doc.draftTextboxes.find(t => t.id === interaction.textboxId); if (!tb) return;
+      const center = { x: interaction.orig.x + interaction.orig.w / 2, y: interaction.orig.y + interaction.orig.h / 2 };
+      const lp = Core.rotatePoint(p.x, p.y, center.x, center.y, -(interaction.boxAngle || 0));
       const r = { ...interaction.orig };
-      if (interaction.handle.kind.includes('n')) { r.y = Math.min(interaction.orig.y + interaction.orig.h - 40, p.y); r.h = interaction.orig.y + interaction.orig.h - r.y; }
-      if (interaction.handle.kind.includes('s')) { r.h = Math.max(40, p.y - interaction.orig.y); }
-      if (interaction.handle.kind.includes('w')) { r.x = Math.min(interaction.orig.x + interaction.orig.w - 60, p.x); r.w = interaction.orig.x + interaction.orig.w - r.x; }
-      if (interaction.handle.kind.includes('e')) { r.w = Math.max(60, p.x - interaction.orig.x); }
+      if (interaction.handle.kind.includes('n')) { r.y = Math.min(interaction.orig.y + interaction.orig.h - 40, lp.y); r.h = interaction.orig.y + interaction.orig.h - r.y; }
+      if (interaction.handle.kind.includes('s')) { r.h = Math.max(40, lp.y - interaction.orig.y); }
+      if (interaction.handle.kind.includes('w')) { r.x = Math.min(interaction.orig.x + interaction.orig.w - 60, lp.x); r.w = interaction.orig.x + interaction.orig.w - r.x; }
+      if (interaction.handle.kind.includes('e')) { r.w = Math.max(60, lp.x - interaction.orig.x); }
       tb.x = r.x; tb.y = r.y; tb.width = r.w; tb.height = r.h;
       layoutTextbox(tb); draw(); syncUI(); return;
     }
     if (interaction.mode === 'rotateTextbox') {
       const tb = doc.draftTextboxes.find(t => t.id === interaction.textboxId); if (!tb) return;
       const angle = Math.atan2(p.y - interaction.center.y, p.x - interaction.center.x) - interaction.startAngle;
-      tb.previewGlyphs.forEach((g, i) => {
-        const old = interaction.glyphSnapshot[i];
-        const q = Core.rotatePoint(old.x, old.y, interaction.center.x, interaction.center.y, angle);
-        g.x = q.x; g.y = q.y; g.rotation = old.rotation + angle * 180 / Math.PI;
-      });
+      tb.rotation = interaction.origRotation + angle * 180 / Math.PI;
+      applyTextboxRotation(tb);
       draw(); syncUI(); return;
     }
     if (interaction.mode === 'moveSingleGlyph' || interaction.mode === 'moveGlyphGroup') {
