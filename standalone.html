@@ -3,19 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Handwriting Variant MVP · Standalone</title>
+  <title>HandWriter · v0.2</title>
   <link rel="stylesheet" href="./assets/standalone.css" />
 </head>
 <body>
 <div class="shell">
   <div class="top">
     <div>
-      <div class="eyebrow">ZERO-BUILD TECH DEMO</div>
-      <h1>Handwriting Variant MVP</h1>
-      <p>Bezier 非刚性局部形变 · 多候选 Variant · 多选移动 / 旋转 · 批量属性编辑</p>
+      <div class="eyebrow">HANDWRITER V0.2</div>
+      <h1>HandWriter Editor</h1>
+      <p>背景图 / 自定义画布尺寸 / 文本框生成 / 文本框整体调节 / 单字 Variant</p>
     </div>
     <div class="fontbar">
-      <select id="presetSelect" class="fontselect" aria-label="handwriting-web 预设字体">
+      <select id="presetSelect" class="fontselect" aria-label="字体预设">
         <option value="yunyan">云烟体</option>
         <option value="huayang">华阳手写体</option>
         <option value="liguofu">李国夫手写体</option>
@@ -28,58 +28,100 @@
   </div>
 
   <section class="controls">
-    <textarea id="textInput" rows="3">今天下午我们一起去图书馆学习。
-同一个字，也应该有细微不同。</textarea>
-    <div class="row">
-      <label>默认字号 <input id="fontSize" type="range" min="34" max="90" value="58"><span id="fontSizeVal" class="value">58px</span></label>
-      <label>非刚性扰动 <input id="strength" type="range" min="0" max="0.04" step="0.001" value="0.018"><span id="strengthVal" class="value">1.8%</span></label>
-      <label>重复字差异 <input id="diversity" type="range" min="0" max="1" step="0.05" value="0.65"><span id="diversityVal" class="value">65%</span></label>
-      <button id="generateBtn" class="primary" disabled>生成文字</button>
+    <div class="panel">
+      <h2>文本内容</h2>
+      <p class="desc">在左侧画布上点击“新建文本框”，拖出一个框，在该范围内生成手写文字。单击文本框可整体编辑文本框，单击字符可编辑单字。</p>
+      <textarea id="textInput" rows="4">今天下午我们一起去图书馆学习。
+同一个字，也应该有细微不同。
+如果文本很多，就放进一个文本框内自动换行。</textarea>
+      <div class="row">
+        <label>默认字号 <input id="fontSize" type="range" min="24" max="100" value="56"><span id="fontSizeVal" class="value">56px</span></label>
+        <label>非刚性扰动 <input id="strength" type="range" min="0" max="0.04" step="0.001" value="0.018"><span id="strengthVal" class="value">1.8%</span></label>
+        <label>重复字差异 <input id="diversity" type="range" min="0" max="1" step="0.05" value="0.65"><span id="diversityVal" class="value">65%</span></label>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>画布 / 背景</h2>
+      <div class="fields">
+        <div class="split2">
+          <div class="field"><label>预设尺寸</label><select id="sizePreset" class="modeSelect"><option value="custom">自定义</option><option value="a4p">A4 竖版 2480×3508</option><option value="a4l">A4 横版 3508×2480</option><option value="letter">Letter 2550×3300</option><option value="square">正方形 2048×2048</option><option value="hd">HD 1920×1080</option></select></div>
+          <div class="field"><label>显示缩放 <span class="sub" id="zoomText">35%</span></label><input id="zoomInput" type="range" min="0.1" max="1" step="0.05" value="0.35"></div>
+        </div>
+        <div class="split2">
+          <div class="field"><label>画布宽度</label><input id="canvasWidthInput" class="numInput" type="number" min="300" max="6000" step="10" value="1240"></div>
+          <div class="field"><label>画布高度</label><input id="canvasHeightInput" class="numInput" type="number" min="300" max="6000" step="10" value="1754"></div>
+        </div>
+        <div class="split2">
+          <label class="filebtn">上传背景图<input id="bgInput" type="file" accept="image/*"></label>
+          <button id="applyCanvasBtn" class="secondary">应用画布尺寸</button>
+        </div>
+        <div class="split3">
+          <div class="field"><label>背景适配</label><select id="bgMode" class="modeSelect"><option value="contain">缩放(Contain)</option><option value="cover">裁切(Cover)</option><option value="stretch">拉伸(Stretch)</option></select></div>
+          <div class="field"><label>背景缩放 <span class="sub" id="bgScaleText">100%</span></label><input id="bgScale" type="range" min="0.2" max="2.5" step="0.05" value="1"></div>
+          <div class="field"><label>背景透明度 <span class="sub" id="bgOpacityText">100%</span></label><input id="bgOpacity" type="range" min="0.1" max="1" step="0.05" value="1"></div>
+        </div>
+        <div class="split2">
+          <button id="newTextboxBtn" class="primary">新建文本框</button>
+          <button id="clearBgBtn" class="secondary">清除背景</button>
+        </div>
+      </div>
     </div>
   </section>
 
   <section class="workspace">
     <div class="canvasWrap">
-      <div id="placeholder" class="placeholder"><strong>正在加载 handwriting-web 预设字体</strong><span>网络加载失败时仍可选择本地字体。</span></div>
-      <div id="stage" class="stage" hidden><canvas id="canvas" width="1000" height="680"></canvas></div>
+      <div class="stageShell"><canvas id="canvas" width="1240" height="1754"></canvas></div>
     </div>
     <aside class="side">
       <section class="sec">
         <div class="head"><h2>选择</h2><span id="selectedCount">0 个字符</span></div>
-        <div id="selectionInfo" class="muted">单击选择；Shift/Ctrl/Cmd 追加；空白处拖拽框选。</div>
+        <div id="selectionInfo" class="muted">默认选择文本框。点击字符进入单字编辑。空白处取消选择；文本框模式下可拖动/缩放文本框。</div>
       </section>
       <section class="sec">
-        <div class="head"><h2>属性</h2><span id="styleScope">未选择</span></div>
-        <div class="propPanel">
-          <div class="field">
-            <label for="colorInput">颜色 <span class="sub" id="colorText">#161616</span></label>
-            <input id="colorInput" type="color" value="#161616">
+        <div class="head"><h2>文本框</h2><span id="textboxState">未选择</span></div>
+        <div class="fields">
+          <div class="split2">
+            <div class="field"><label>框内字号 <span class="sub" id="boxFontSizeText">56px</span></label><input id="boxFontSize" type="range" min="16" max="120" step="1" value="56"></div>
+            <div class="field"><label>内边距 <span class="sub" id="boxPaddingText">16px</span></label><input id="boxPadding" type="range" min="0" max="80" step="1" value="16"></div>
           </div>
-          <div class="field">
-            <label for="thicknessInput">粗细 <span class="sub" id="thicknessText">0.30px</span></label>
-            <input id="thicknessInput" type="range" min="0" max="3" step="0.05" value="0.30">
+          <div class="split2">
+            <div class="field"><label>字间距 <span class="sub" id="boxCharGapText">0px</span></label><input id="boxCharGap" type="range" min="-10" max="30" step="1" value="0"></div>
+            <div class="field"><label>行距 <span class="sub" id="boxLineGapText">1.55×</span></label><input id="boxLineGap" type="range" min="1" max="2.4" step="0.05" value="1.55"></div>
           </div>
-          <div class="field">
-            <label for="sizeInput">所选字号 <span class="sub" id="sizeText">58px</span></label>
-            <input id="sizeInput" type="range" min="24" max="120" step="1" value="58">
+          <div class="split2">
+            <div class="field"><label>整体偏移 X <span class="sub" id="boxOffsetXText">0px</span></label><input id="boxOffsetX" type="range" min="-100" max="100" step="1" value="0"></div>
+            <div class="field"><label>整体偏移 Y <span class="sub" id="boxOffsetYText">0px</span></label><input id="boxOffsetY" type="range" min="-100" max="100" step="1" value="0"></div>
           </div>
-          <div class="meta"><span>多选时会批量应用到所选字符</span><span id="styleHint">先选择字符</span></div>
-          <button id="applyStyleBtn" class="secondary apply" disabled>应用到所选字符</button>
+          <div class="split2">
+            <button id="regenerateBoxBtn" class="secondary">在框内生成文字</button>
+            <button id="deleteTextboxBtn" class="danger">删除文本框</button>
+          </div>
+          <div class="meta"><span id="overflowInfo">未选择文本框</span><span id="textboxInfo">使用拖拽手柄缩放</span></div>
+        </div>
+      </section>
+      <section class="sec">
+        <div class="head"><h2>单字属性</h2><span id="styleScope">未选择</span></div>
+        <div class="fields">
+          <div class="field"><label for="colorInput">颜色 <span class="sub" id="colorText">#161616</span></label><input id="colorInput" type="color" value="#161616"></div>
+          <div class="field"><label for="thicknessInput">粗细 <span class="sub" id="thicknessText">0.30px</span></label><input id="thicknessInput" type="range" min="0" max="3" step="0.05" value="0.30"></div>
+          <div class="field"><label for="sizeInput">所选字号 <span class="sub" id="sizeText">56px</span></label><input id="sizeInput" type="range" min="16" max="120" step="1" value="56"></div>
+          <div class="meta"><span>单字颜色 / 粗细 / 大小</span><span id="styleHint">先选择字符</span></div>
+          <button id="applyStyleBtn" class="secondary" disabled>应用到所选字符</button>
         </div>
       </section>
       <section class="sec">
         <div class="head"><h2>Variant 候选</h2><button id="rerollBtn" class="link" hidden>换一批</button></div>
-        <div id="candidateArea" class="muted">单选字符后生成 6 个候选。</div>
+        <div id="candidateArea" class="muted">单击字符后显示 6 个候选。</div>
       </section>
       <section class="sec actions">
         <button id="undoBtn" disabled>撤销</button>
         <button id="redoBtn" disabled>重做</button>
-        <button id="deleteBtn" disabled>删除选择</button>
-        <button id="exportBtn" class="export" disabled>导出 PNG</button>
+        <button id="deleteBtn" disabled>删除字符</button>
+        <button id="exportBtn" class="export">导出 PNG</button>
       </section>
     </aside>
   </section>
-  <div class="tip"><span>默认排版已改为按字体基线对齐，修复“高低不齐”的初始位置问题。</span><span>快捷键：Delete · Ctrl/Cmd+Z · Ctrl/Cmd+Shift+Z</span></div>
+  <div class="tip"><span>上传背景图时，画布默认切换为图片像素尺寸；无背景时可使用自定义尺寸或 A4 等预设尺寸。</span><span>双击空白处也可直接创建默认文本框。</span></div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/opentype.js@1.3.4/dist/opentype.min.js"></script>
 <script src="./fonts/presets.js"></script>
