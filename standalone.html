@@ -12,7 +12,7 @@
     <div>
       <div class="eyebrow">HANDWRITER · MVP+</div>
       <h1>HandWriter Editor</h1>
-      <p>文本框首轮排版，确认后解除编组；支持单字编辑、临时多选编组、背景与噪点、局部墨色不均匀。</p>
+      <p>文本框首轮排版，确认后解除编组；支持单字编辑、临时多选编组、背景融合、纸纹采样、局部压印/渗墨、局部墨色不均匀。</p>
     </div>
     <div class="fontbar">
       <select id="presetSelect" class="fontselect" aria-label="字体预设">
@@ -62,8 +62,8 @@
         </div>
         <div class="split3">
           <div class="field"><label>文字融合强度 <span class="sub" id="noiseAmountText">0%</span></label><input id="noiseAmount" type="range" min="0" max="1" step="0.05" value="0"></div>
-          <div class="field"><label>噪点尺寸 <span class="sub" id="noiseSizeText">1px</span></label><input id="noiseSize" type="range" min="1" max="4" step="1" value="1"></div>
-          <div class="field"><label>彩色噪点 <span class="sub" id="noiseColorText">关闭</span></label><input id="noiseColor" type="range" min="0" max="1" step="1" value="0"></div>
+          <div class="field"><label>渗墨/毛边范围 <span class="sub" id="noiseSizeText">1px</span></label><input id="noiseSize" type="range" min="1" max="4" step="1" value="1"></div>
+          <div class="field"><label>彩色纸面偏色 <span class="sub" id="noiseColorText">关闭</span></label><input id="noiseColor" type="range" min="0" max="1" step="1" value="0"></div>
         </div>
         <div class="split2">
           <button id="newTextboxBtn" class="primary">新建文本框</button>

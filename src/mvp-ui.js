@@ -23,6 +23,9 @@
   };
 
   const ctx = els.canvas.getContext('2d');
+  const paperCanvas = document.createElement('canvas');
+  const paperCtx = paperCanvas.getContext('2d', { willReadFrequently: true });
+  let paperMap = null;
   let font = null;
   let doc = createDocument(1240, 1754);
   let selectedGlyphIds = new Set();
@@ -38,7 +41,7 @@
     return {
       width, height, zoom: 0.35,
       background: { image: null, mode: 'contain', opacity: 1, scale: 1, fileName: '' },
-      noise: { amount: 0, size: 1, colorful: false, seed: 305419896 },
+      noise: { amount: 0, size: 1, colorful: false, seed: 0x12345678 },
       glyphs: [],
       draftTextboxes: []
     };
@@ -67,6 +70,7 @@
     doc = target;
     resetSelectionState();
     interaction = { mode: null };
+    rebuildPaperMap();
     draw();
     syncUI();
   }
@@ -85,6 +89,7 @@
     els.canvas.height = doc.height;
     els.canvas.style.width = Math.round(doc.width * doc.zoom) + 'px';
     els.canvas.style.height = Math.round(doc.height * doc.zoom) + 'px';
+    rebuildPaperMap();
   }
 
   function updateZoom(value) {
@@ -192,7 +197,6 @@
       const adv = ((glyph.advanceWidth || units) / units) * size + tb.charGap;
       if (x + adv > left + inner.w && x > left) { x = left; lineIndex++; baseline = top + lineIndex * lineHeight + ascent; }
       if (baseline + size * 0.35 > top + inner.h) { overflowCount++; continue; }
-
       const occ = repeatCount.get(ch) || 0;
       repeatCount.set(ch, occ + 1);
       const instanceBias = Math.min(1.15, diversity * (0.22 + occ * 0.28));
@@ -282,8 +286,72 @@
     ctx.restore();
   }
 
-  function drawNoise() {
-    // Global canvas noise is intentionally disabled. Noise is applied to glyphs only.
+  function drawBackgroundToContext(target, w, h) {
+    target.save();
+    target.fillStyle = '#fff';
+    target.fillRect(0, 0, w, h);
+    const bg = doc.background;
+    if (!bg.image) { target.restore(); return; }
+    target.globalAlpha = bg.opacity;
+    if (bg.mode === 'stretch') {
+      target.drawImage(bg.image, 0, 0, w, h);
+    } else {
+      const iw = bg.image.width, ih = bg.image.height;
+      const scale = bg.mode === 'cover' ? Math.max(w / iw, h / ih) : Math.min(w / iw, h / ih);
+      const finalScale = scale * bg.scale;
+      const dw = iw * finalScale, dh = ih * finalScale;
+      const dx = (w - dw) / 2, dy = (h - dh) / 2;
+      target.drawImage(bg.image, dx, dy, dw, dh);
+    }
+    target.restore();
+  }
+
+  function rebuildPaperMap() {
+    const sampleScale = Math.max(1, Math.ceil(Math.max(doc.width, doc.height) / 900));
+    const w = Math.max(32, Math.round(doc.width / sampleScale));
+    const h = Math.max(32, Math.round(doc.height / sampleScale));
+    paperCanvas.width = w;
+    paperCanvas.height = h;
+    drawBackgroundToContext(paperCtx, w, h);
+    const image = paperCtx.getImageData(0, 0, w, h);
+    const src = image.data;
+    const luminance = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      const idx = i * 4;
+      luminance[i] = (0.299 * src[idx] + 0.587 * src[idx + 1] + 0.114 * src[idx + 2]) / 255;
+    }
+    const smooth = new Float32Array(w * h);
+    const contrast = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let sum = 0, sum2 = 0, count = 0;
+        for (let oy = -1; oy <= 1; oy++) {
+          for (let ox = -1; ox <= 1; ox++) {
+            const xx = Math.max(0, Math.min(w - 1, x + ox));
+            const yy = Math.max(0, Math.min(h - 1, y + oy));
+            const val = luminance[yy * w + xx];
+            sum += val; sum2 += val * val; count++;
+          }
+        }
+        const mean = sum / count;
+        smooth[y * w + x] = mean;
+        contrast[y * w + x] = Math.sqrt(Math.max(0, sum2 / count - mean * mean));
+      }
+    }
+    const texture = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) texture[i] = Core.clamp((luminance[i] - smooth[i]) * 3.5, -1, 1);
+    paperMap = { w, h, scale: sampleScale, luminance, smooth, texture, contrast };
+  }
+
+  function samplePaperWorld(x, y) {
+    if (!paperMap) return { lum: 1, tex: 0, contrast: 0 };
+    const px = Core.clamp(x / paperMap.scale, 0, paperMap.w - 1.001);
+    const py = Core.clamp(y / paperMap.scale, 0, paperMap.h - 1.001);
+    const x0 = Math.floor(px), y0 = Math.floor(py), x1 = Math.min(paperMap.w - 1, x0 + 1), y1 = Math.min(paperMap.h - 1, y0 + 1);
+    const tx = px - x0, ty = py - y0;
+    const idx = (xx, yy) => yy * paperMap.w + xx;
+    const bilerp = arr => Core.lerp(Core.lerp(arr[idx(x0, y0)], arr[idx(x1, y0)], tx), Core.lerp(arr[idx(x0, y1)], arr[idx(x1, y1)], tx), ty);
+    return { lum: bilerp(paperMap.luminance), tex: bilerp(paperMap.texture), contrast: bilerp(paperMap.contrast) };
   }
 
   function drawInkTexture(g) {
@@ -336,24 +404,53 @@
     ctx.restore();
   }
 
-  function drawGlyphBlendNoise(g) {
+  function drawPaperTextureModulation(g, paper) {
+    const amount = doc.noise.amount;
+    if (!amount) return;
+    const rng = Core.mulberry32(Core.mixSeed(g.inkSeed || g.variantSeed, 6113, 29));
+    const width = g.geo.width, height = g.geo.height;
+    const baseHex = g.fill || DEFAULT_COLOR;
+    ctx.save();
+    ctx.clip(g.geo.path);
+    const rows = Math.max(4, Math.round(height / 12));
+    for (let i = 0; i < rows; i++) {
+      const y = (i / Math.max(1, rows - 1)) * height;
+      const sample = samplePaperWorld(g.x + (rng() - 0.5) * width * 0.25, g.y - height / 2 + y);
+      const alpha = (0.03 + amount * 0.08) * (0.7 + sample.contrast * 6);
+      const delta = (sample.tex * 22) + (sample.lum - 0.5) * 10;
+      ctx.fillStyle = Core.rgbaString(Core.hexToRgb(Core.offsetColor(baseHex, delta)), alpha);
+      ctx.fillRect(0, y, width, Math.max(1, height / rows + 1));
+    }
+    ctx.restore();
+
+    if (doc.background.image) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.globalAlpha = 0.10 + amount * 0.16;
+      ctx.fillStyle = `rgba(255,255,255,${Math.max(0, 1 - paper.lum) * 0.45})`;
+      ctx.fill(g.geo.path);
+      ctx.restore();
+    }
+  }
+
+  function drawGlyphBlendNoise(g, paper) {
+    const amount = doc.noise.amount;
+    if (!amount) return;
     const noise = doc.noise;
-    if (!noise.amount) return;
-    const amount = noise.amount;
     const size = Math.max(1, noise.size | 0);
-    const seed = Core.mixSeed(noise.seed || 305419896, g.inkSeed || g.variantSeed, g.char.charCodeAt(0));
+    const seed = Core.mixSeed(noise.seed || 0x12345678, g.inkSeed || g.variantSeed, g.char.charCodeAt(0));
     const rng = Core.mulberry32(seed);
     const baseHex = g.fill || DEFAULT_COLOR;
     const baseRgb = Core.hexToRgb(baseHex);
 
-    const fuzzPasses = 1 + Math.round(amount * 4 + size * 0.4);
+    const fuzzPasses = 1 + Math.round(amount * 4 + size * 0.4 + paper.contrast * 12);
     for (let i = 0; i < fuzzPasses; i++) {
-      const dx = (rng() - 0.5) * size * (0.5 + amount);
-      const dy = (rng() - 0.5) * size * (0.5 + amount);
+      const dx = (rng() - 0.5) * size * (0.5 + amount + paper.contrast * 6);
+      const dy = (rng() - 0.5) * size * (0.5 + amount + paper.contrast * 6);
       const delta = (rng() - 0.5) * (noise.colorful ? 40 : 22);
       ctx.save();
       ctx.translate(dx, dy);
-      ctx.globalAlpha = 0.025 + amount * 0.05;
+      ctx.globalAlpha = (0.02 + amount * 0.045) * (0.8 + (1 - paper.lum) * 0.6);
       ctx.fillStyle = Core.rgbaString(noise.colorful ? { r: baseRgb.r + delta, g: baseRgb.g - delta * 0.25, b: baseRgb.b + delta * 0.6 } : Core.hexToRgb(Core.offsetColor(baseHex, delta)), 1);
       ctx.fill(g.geo.path);
       ctx.restore();
@@ -367,34 +464,75 @@
       const r = (0.15 + rng() * 0.75) * size;
       const delta = (rng() - 0.5) * (noise.colorful ? 48 : 26);
       ctx.beginPath();
-      ctx.fillStyle = Core.rgbaString(noise.colorful ? { r: baseRgb.r + delta, g: baseRgb.g + delta * 0.2, b: baseRgb.b - delta * 0.35 } : Core.hexToRgb(Core.offsetColor(baseHex, delta)), 0.035 + rng() * (0.06 + amount * 0.06));
+      ctx.fillStyle = Core.rgbaString(noise.colorful ? { r: baseRgb.r + delta, g: baseRgb.g + delta * 0.2, b: baseRgb.b - delta * 0.35 } : Core.hexToRgb(Core.offsetColor(baseHex, delta)), 0.03 + rng() * (0.05 + amount * 0.06));
       ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();
+  }
+
+  function drawEmbossAndBleed(g, paper) {
+    const amount = doc.noise.amount;
+    if (!amount) return;
+    const baseHex = g.fill || DEFAULT_COLOR;
+    const dark = Core.hexToRgb(Core.offsetColor(baseHex, -28));
+    const light = Core.hexToRgb(Core.offsetColor(baseHex, 34));
+    const bleedRadius = (0.6 + doc.noise.size * 0.9 + amount * 1.6 + paper.contrast * 10);
 
     ctx.save();
-    ctx.globalAlpha = 0.03 + amount * 0.08;
-    ctx.lineWidth = Math.max(0.35, (g.strokeWidth || 0.1) + size * 0.35);
-    ctx.lineCap = 'round';
+    ctx.globalAlpha = 0.05 + amount * 0.10;
+    ctx.shadowBlur = bleedRadius;
+    ctx.shadowColor = Core.rgbaString(dark, 0.45);
+    ctx.shadowOffsetX = 0.4 + paper.tex * 1.2;
+    ctx.shadowOffsetY = 0.5 + paper.contrast * 10;
+    ctx.strokeStyle = Core.rgbaString(dark, 0.32 + amount * 0.25);
+    ctx.lineWidth = Math.max(0.8, (g.strokeWidth || 0.25) + bleedRadius * 0.35);
     ctx.lineJoin = 'round';
-    const edgeDelta = (rng() - 0.5) * (noise.colorful ? 38 : 20);
-    ctx.strokeStyle = Core.rgbaString(noise.colorful ? { r: baseRgb.r + edgeDelta, g: baseRgb.g - edgeDelta * 0.2, b: baseRgb.b + edgeDelta * 0.25 } : Core.hexToRgb(Core.offsetColor(baseHex, edgeDelta)), 1);
+    ctx.lineCap = 'round';
+    ctx.stroke(g.geo.path);
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalAlpha = 0.02 + amount * 0.05;
+    ctx.translate(-0.6, -0.5);
+    ctx.strokeStyle = Core.rgbaString(light, 0.55);
+    ctx.lineWidth = Math.max(0.6, (g.strokeWidth || 0.25) + 0.4);
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.stroke(g.geo.path);
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalAlpha = 0.018 + amount * 0.05;
+    ctx.translate(0.8 + paper.tex * 1.4, 0.8 + paper.contrast * 9);
+    ctx.strokeStyle = Core.rgbaString(dark, 0.65);
+    ctx.lineWidth = Math.max(0.6, (g.strokeWidth || 0.25) + 0.5);
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
     ctx.stroke(g.geo.path);
     ctx.restore();
   }
 
   function drawGlyph(g) {
     Core.ensureGeo(font, g);
+    const paper = samplePaperWorld(g.x, g.y);
     ctx.save();
     ctx.translate(g.x, g.y);
     ctx.rotate((g.rotation || 0) * Math.PI / 180);
     ctx.scale(g.scaleX || 1, g.scaleY || 1);
     ctx.translate(-g.geo.width / 2, -g.geo.height / 2);
-    ctx.fillStyle = g.fill || DEFAULT_COLOR;
+
+    drawEmbossAndBleed(g, paper);
+
+    if (doc.background.image) ctx.globalCompositeOperation = 'multiply';
+    const darkness = (1 - paper.lum) * 0.06 + paper.tex * 0.04;
+    ctx.fillStyle = Core.offsetColor(g.fill || DEFAULT_COLOR, darkness * 255);
+    ctx.globalAlpha = 0.92 - paper.contrast * 0.22;
     ctx.fill(g.geo.path);
+    ctx.globalAlpha = 1;
     drawInkTexture(g);
-    drawGlyphBlendNoise(g);
+    drawPaperTextureModulation(g, paper);
+    drawGlyphBlendNoise(g, paper);
     if ((g.strokeWidth || 0) > 0.001) {
       ctx.strokeStyle = g.fill || DEFAULT_COLOR;
       ctx.lineWidth = g.strokeWidth;
@@ -506,9 +644,8 @@
   function drawSelectionOverlay() {
     const glyphs = selectedGlyphs();
     if (!glyphs.length) return;
-    if (glyphs.length === 1) {
-      drawRotatedSelectionBox(getGlyphRenderBox(glyphs[0]));
-    } else {
+    if (glyphs.length === 1) drawRotatedSelectionBox(getGlyphRenderBox(glyphs[0]));
+    else {
       const box = ensureMultiSelection();
       if (box) drawRotatedSelectionBox(box);
     }
@@ -519,15 +656,12 @@
     for (const g of doc.glyphs) drawGlyph(g);
     drawSelectionOverlay();
     for (const tb of doc.draftTextboxes) drawDraftTextbox(tb);
-    drawNoise();
     if (interaction.mode === 'marqueeSelect' && interaction.selectionRect) drawRectOverlay(interaction.selectionRect, 'rgba(0,0,0,.05)', 'rgba(0,0,0,.45)');
     if (interaction.mode === 'createTextbox' && interaction.previewRect) drawRectOverlay(interaction.previewRect, 'rgba(0,0,0,.03)', 'rgba(0,0,0,.55)');
   }
 
   function hitTextboxHandle(tb, p) {
-    for (const h of textboxHandles(tb)) {
-      if (Math.hypot(p.x - h.x, p.y - h.y) <= HANDLE_HIT) return h;
-    }
+    for (const h of textboxHandles(tb)) if (Math.hypot(p.x - h.x, p.y - h.y) <= HANDLE_HIT) return h;
     return null;
   }
 
@@ -583,7 +717,7 @@
     els.boxOffsetX.value = String(Math.round(tb.offsetX)); els.boxOffsetXText.textContent = Math.round(tb.offsetX) + 'px';
     els.boxOffsetY.value = String(Math.round(tb.offsetY)); els.boxOffsetYText.textContent = Math.round(tb.offsetY) + 'px';
     els.overflowInfo.textContent = tb.overflowCount ? `有 ${tb.overflowCount} 个字符未放入文本框` : '文本框内文字已全部放下';
-    els.textboxInfo.textContent = `${Math.round(tb.width)}×${Math.round(tb.height)} px`;
+    els.textboxInfo.textContent = `${Math.round(tb.width)}×${Math.round(tb.height)} px，旋转 ${Math.round(tb.rotation || 0)}°`;
   }
 
   function syncGlyphPanel() {
@@ -653,7 +787,7 @@
     if (selectedTextboxId) {
       els.selectionInfo.innerHTML = '<div class="selectedText">文本框排版中</div><p class="muted">当前在文本框内预览排版。可以拖动、缩放、旋转文本框；点“确认并解除编组”后，字符会变成独立对象。</p>';
     } else if (glyphs.length === 1) {
-      els.selectionInfo.innerHTML = `<div class="selectedText">${glyphs[0].char}</div><p class="muted">当前为单字编辑模式。选择框会随字符旋转。可拖动、旋转，并改颜色、粗细、大小或切换 Variant。</p>`;
+      els.selectionInfo.innerHTML = `<div class="selectedText">${glyphs[0].char}</div><p class="muted">当前为单字编辑模式。选择框会随字符旋转。渗墨、压印与纸纹会自动按背景采样融合。</p>`;
     } else if (glyphs.length > 1) {
       els.selectionInfo.innerHTML = `<div class="selectedText">临时编组</div><p class="muted">已框选 ${glyphs.length} 个字符。可拖动整体移动，或使用旋转手柄整体旋转；选择框会保持同角度旋转。</p>`;
     } else {
@@ -735,9 +869,9 @@
   els.sizePreset.onchange = () => applySizePreset(els.sizePreset.value);
   els.applyCanvasBtn.onclick = () => commitCanvasSize(+els.canvasWidthInput.value, +els.canvasHeightInput.value);
   els.zoomInput.oninput = () => { updateZoom(els.zoomInput.value); draw(); };
-  els.bgMode.onchange = () => { doc.background.mode = els.bgMode.value; draw(); };
-  els.bgScale.oninput = () => { doc.background.scale = +els.bgScale.value; els.bgScaleText.textContent = Math.round(doc.background.scale * 100) + '%'; draw(); };
-  els.bgOpacity.oninput = () => { doc.background.opacity = +els.bgOpacity.value; els.bgOpacityText.textContent = Math.round(doc.background.opacity * 100) + '%'; draw(); };
+  els.bgMode.onchange = () => { doc.background.mode = els.bgMode.value; rebuildPaperMap(); draw(); };
+  els.bgScale.oninput = () => { doc.background.scale = +els.bgScale.value; els.bgScaleText.textContent = Math.round(doc.background.scale * 100) + '%'; rebuildPaperMap(); draw(); };
+  els.bgOpacity.oninput = () => { doc.background.opacity = +els.bgOpacity.value; els.bgOpacityText.textContent = Math.round(doc.background.opacity * 100) + '%'; rebuildPaperMap(); draw(); };
   els.noiseAmount.oninput = () => { doc.noise.amount = +els.noiseAmount.value; els.noiseAmountText.textContent = Math.round(doc.noise.amount * 100) + '%'; draw(); };
   els.noiseSize.oninput = () => { doc.noise.size = +els.noiseSize.value; els.noiseSizeText.textContent = doc.noise.size + 'px'; draw(); };
   els.noiseColor.oninput = () => { doc.noise.colorful = !!(+els.noiseColor.value); els.noiseColorText.textContent = doc.noise.colorful ? '开启' : '关闭'; draw(); };
@@ -759,7 +893,7 @@
     };
     img.src = URL.createObjectURL(file);
   };
-  els.clearBgBtn.onclick = () => { snapshot(); doc.background.image = null; doc.background.fileName = ''; draw(); syncUI(); };
+  els.clearBgBtn.onclick = () => { snapshot(); doc.background.image = null; doc.background.fileName = ''; rebuildPaperMap(); draw(); syncUI(); };
   els.newTextboxBtn.onclick = () => { clearSelection(); interaction = { mode: 'createTextbox' }; draw(); syncUI(); };
   els.clearSelectionBtn.onclick = () => { clearSelection(); interaction = { mode: null }; draw(); syncUI(); };
   els.regenerateBoxBtn.onclick = () => { if (!activeTextbox()) return; snapshot(); applyTextboxControls(); };
@@ -825,7 +959,10 @@
     els.canvas.setPointerCapture(evt.pointerId);
 
     if (interaction.mode === 'createTextbox') {
-      interaction.start = p; interaction.previewRect = { x: p.x, y: p.y, w: 1, h: 1 }; draw(); return;
+      interaction.start = p;
+      interaction.previewRect = { x: p.x, y: p.y, w: 1, h: 1 };
+      draw();
+      return;
     }
 
     const tb = activeTextbox();
@@ -841,8 +978,7 @@
       }
       if (Core.pointInRotatedRect(p, getTextboxRenderBox(tb))) {
         snapshot();
-        interaction = { mode: 'moveTextbox', start: p, textboxId: tb.id, orig: { x: tb.x, y: tb.y },
-          glyphSnapshot: tb.previewGlyphs.map(g => ({ id: g.id, x: g.x, y: g.y })), baseGlyphSnapshot: (tb.basePreviewGlyphs || []).map(g => ({ id: g.id, x: g.x, y: g.y })) };
+        interaction = { mode: 'moveTextbox', start: p, textboxId: tb.id, orig: { x: tb.x, y: tb.y }, glyphSnapshot: tb.previewGlyphs.map(g => ({ id: g.id, x: g.x, y: g.y })), baseGlyphSnapshot: (tb.basePreviewGlyphs || []).map(g => ({ id: g.id, x: g.x, y: g.y })) };
         draw(); return;
       }
     }
@@ -873,9 +1009,7 @@
         const next = new Set(selectedGlyphIds);
         if (next.has(glyph.id)) next.delete(glyph.id); else next.add(glyph.id);
         selectedGlyphIds = next;
-      } else {
-        selectedGlyphIds = new Set([glyph.id]);
-      }
+      } else selectedGlyphIds = new Set([glyph.id]);
       if (selectedGlyphIds.size > 1) refreshMultiSelection(0); else multiSelectionBox = null;
       draw(); syncUI(); return;
     }
@@ -928,18 +1062,15 @@
       for (const s of interaction.glyphSnapshot) {
         const g = doc.glyphs.find(x => x.id === s.id); if (g) { g.x = s.x + dx; g.y = s.y + dy; }
       }
-      if (interaction.mode === 'moveGlyphGroup' && multiSelectionBox) {
-        multiSelectionBox.cx = interaction.startBox.cx + dx; multiSelectionBox.cy = interaction.startBox.cy + dy;
-      }
+      if (interaction.mode === 'moveGlyphGroup' && multiSelectionBox) { multiSelectionBox.cx = interaction.startBox.cx + dx; multiSelectionBox.cy = interaction.startBox.cy + dy; }
       draw(); syncUI(); return;
     }
     if (interaction.mode === 'rotateSingleGlyph' || interaction.mode === 'rotateGlyphGroup') {
       const angle = Math.atan2(p.y - interaction.center.y, p.x - interaction.center.x) - interaction.startAngle;
       for (const old of interaction.glyphSnapshot) {
         const g = doc.glyphs.find(x => x.id === old.id); if (!g) continue;
-        if (interaction.mode === 'rotateSingleGlyph') {
-          g.rotation = old.rotation + angle * 180 / Math.PI;
-        } else {
+        if (interaction.mode === 'rotateSingleGlyph') g.rotation = old.rotation + angle * 180 / Math.PI;
+        else {
           const q = Core.rotatePoint(old.x, old.y, interaction.center.x, interaction.center.y, angle);
           g.x = q.x; g.y = q.y; g.rotation = old.rotation + angle * 180 / Math.PI;
         }
@@ -990,6 +1121,7 @@
   els.noiseAmountText.textContent = '0%';
   els.noiseSizeText.textContent = '1px';
   els.noiseColorText.textContent = '关闭';
+  rebuildPaperMap();
   syncUI();
   draw();
   loadPreset('yunyan');
