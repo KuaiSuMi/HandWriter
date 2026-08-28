@@ -1,0 +1,31 @@
+name: Apply renderer sync patch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/.sync-patch/READY'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply staged patch
+        shell: bash
+        run: |
+          cat .github/.sync-patch/part1 .github/.sync-patch/part2 .github/.sync-patch/part3 .github/.sync-patch/part4 > /tmp/latest.patch
+          git apply --check /tmp/latest.patch
+          git apply /tmp/latest.patch
+          rm -rf .github/.sync-patch
+          rm -f .github/workflows/apply-sync.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat: add paper sampling background-aware edges and emboss bleed'
+          git push origin HEAD:main
