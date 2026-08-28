@@ -1,0 +1,90 @@
+electionBox(getGlyphRenderBox(glyphs[0]));
+-    } else {
++    if (glyphs.length === 1) drawRotatedSelectionBox(getGlyphRenderBox(glyphs[0]));
++    else {
+       const box = ensureMultiSelection();
+       if (box) drawRotatedSelectionBox(box);
+     }
+@@ -523,15 +656,12 @@
+     for (const g of doc.glyphs) drawGlyph(g);
+     drawSelectionOverlay();
+     for (const tb of doc.draftTextboxes) drawDraftTextbox(tb);
+-    drawNoise();
+     if (interaction.mode === 'marqueeSelect' && interaction.selectionRect) drawRectOverlay(interaction.selectionRect, 'rgba(0,0,0,.05)', 'rgba(0,0,0,.45)');
+     if (interaction.mode === 'createTextbox' && interaction.previewRect) drawRectOverlay(interaction.previewRect, 'rgba(0,0,0,.03)', 'rgba(0,0,0,.55)');
+   }
+ 
+   function hitTextboxHandle(tb, p) {
+-    for (const h of textboxHandles(tb)) {
+-      if (Math.hypot(p.x - h.x, p.y - h.y) <= HANDLE_HIT) return h;
+-    }
++    for (const h of textboxHandles(tb)) if (Math.hypot(p.x - h.x, p.y - h.y) <= HANDLE_HIT) return h;
+     return null;
+   }
+ 
+@@ -587,7 +717,7 @@
+     els.boxOffsetX.value = String(Math.round(tb.offsetX)); els.boxOffsetXText.textContent = Math.round(tb.offsetX) + 'px';
+     els.boxOffsetY.value = String(Math.round(tb.offsetY)); els.boxOffsetYText.textContent = Math.round(tb.offsetY) + 'px';
+     els.overflowInfo.textContent = tb.overflowCount ? `有 ${tb.overflowCount} 个字符未放入文本框` : '文本框内文字已全部放下';
+-    els.textboxInfo.textContent = `${Math.round(tb.width)}×${Math.round(tb.height)} px`;
++    els.textboxInfo.textContent = `${Math.round(tb.width)}×${Math.round(tb.height)} px，旋转 ${Math.round(tb.rotation || 0)}°`;
+   }
+ 
+   function syncGlyphPanel() {
+@@ -657,7 +787,7 @@
+     if (selectedTextboxId) {
+       els.selectionInfo.innerHTML = '<div class="selectedText">文本框排版中</div><p class="muted">当前在文本框内预览排版。可以拖动、缩放、旋转文本框；点“确认并解除编组”后，字符会变成独立对象。</p>';
+     } else if (glyphs.length === 1) {
+-      els.selectionInfo.innerHTML = `<div class="selectedText">${glyphs[0].char}</div><p class="muted">当前为单字编辑模式。选择框会随字符旋转。可拖动、旋转，并改颜色、粗细、大小或切换 Variant。</p>`;
++      els.selectionInfo.innerHTML = `<div class="selectedText">${glyphs[0].char}</div><p class="muted">当前为单字编辑模式。选择框会随字符旋转。渗墨、压印与纸纹会自动按背景采样融合。</p>`;
+     } else if (glyphs.length > 1) {
+       els.selectionInfo.innerHTML = `<div class="selectedText">临时编组</div><p class="muted">已框选 ${glyphs.length} 个字符。可拖动整体移动，或使用旋转手柄整体旋转；选择框会保持同角度旋转。</p>`;
+     } else {
+@@ -739,9 +869,9 @@
+   els.sizePreset.onchange = () => applySizePreset(els.sizePreset.value);
+   els.applyCanvasBtn.onclick = () => commitCanvasSize(+els.canvasWidthInput.value, +els.canvasHeightInput.value);
+   els.zoomInput.oninput = () => { updateZoom(els.zoomInput.value); draw(); };
+-  els.bgMode.onchange = () => { doc.background.mode = els.bgMode.value; draw(); };
+-  els.bgScale.oninput = () => { doc.background.scale = +els.bgScale.value; els.bgScaleText.textContent = Math.round(doc.background.scale * 100) + '%'; draw(); };
+-  els.bgOpacity.oninput = () => { doc.background.opacity = +els.bgOpacity.value; els.bgOpacityText.textContent = Math.round(doc.background.opacity * 100) + '%'; draw(); };
++  els.bgMode.onchange = () => { rebuildPaperMap(); draw(); };
++  els.bgScale.oninput = () => { doc.background.scale = +els.bgScale.value; els.bgScaleText.textContent = Math.round(doc.background.scale * 100) + '%'; rebuildPaperMap(); draw(); };
++  els.bgOpacity.oninput = () => { doc.background.opacity = +els.bgOpacity.value; els.bgOpacityText.textContent = Math.round(doc.background.opacity * 100) + '%'; rebuildPaperMap(); draw(); };
+   els.noiseAmount.oninput = () => { doc.noise.amount = +els.noiseAmount.value; els.noiseAmountText.textContent = Math.round(doc.noise.amount * 100) + '%'; draw(); };
+   els.noiseSize.oninput = () => { doc.noise.size = +els.noiseSize.value; els.noiseSizeText.textContent = doc.noise.size + 'px'; draw(); };
+   els.noiseColor.oninput = () => { doc.noise.colorful = !!(+els.noiseColor.value); els.noiseColorText.textContent = doc.noise.colorful ? '开启' : '关闭'; draw(); };
+@@ -763,7 +893,7 @@
+     };
+     img.src = URL.createObjectURL(file);
+   };
+-  els.clearBgBtn.onclick = () => { snapshot(); doc.background.image = null; doc.background.fileName = ''; draw(); syncUI(); };
++  els.clearBgBtn.onclick = () => { snapshot(); doc.background.image = null; doc.background.fileName = ''; rebuildPaperMap(); draw(); syncUI(); };
+   els.newTextboxBtn.onclick = () => { clearSelection(); interaction = { mode: 'createTextbox' }; draw(); syncUI(); };
+   els.clearSelectionBtn.onclick = () => { clearSelection(); interaction = { mode: null }; draw(); syncUI(); };
+   els.regenerateBoxBtn.onclick = () => { if (!activeTextbox()) return; snapshot(); applyTextboxControls(); };
+@@ -829,7 +959,10 @@
+     els.canvas.setPointerCapture(evt.pointerId);
+ 
+     if (interaction.mode === 'createTextbox') {
+-      interaction.start = p; interaction.previewRect = { x: p.x, y: p.y, w: 1, h: 1 }; draw(); return;
++      interaction.start = p;
++      interaction.previewRect = { x: p.x, y: p.y, w: 1, h: 1 };
++      draw();
++      return;
+     }
+ 
+     const tb = activeTextbox();
+@@ -845,8 +978,7 @@
+       }
+       if (Core.pointInRotatedRect(p, getTextboxRenderBox(tb))) {
+         snapshot();
+-        interaction = { mode: 'moveTextbox', start: p, textboxId: tb.id, orig: { x: tb.x, y: tb.y },
+-          glyphSnapshot: tb.previewGlyphs.map(g => ({ id: g.id, x: g.x, y: g.y })), baseGlyphSnapshot: (tb.basePreviewGlyphs || []).map(g => ({ id: g.id, x: g.x, y: g.y })) };
++        interaction = { mode: 'moveTextbox', start: p, textboxId: tb.id, orig: { x: tb.x, y: tb.y }, glyphSnapshot: tb.previewGlyphs.map(g => ({ id: g.id, x: g.x, y: g.y })), baseGlyphSnapshot: (tb.basePreviewGlyphs || []).map(g => ({ id: g.id, x: g.x, y: g.y })) };
+         draw(); return;
+       }
+     }
+@@ -877,9 +1009,7 @@
+         const next = new Set(selectedGlyphIds);
+         if (next.has(glyph.id)) next.delete(glyph.id); else next.add(glyph.id);
+         selectedGlyphIds = ne
