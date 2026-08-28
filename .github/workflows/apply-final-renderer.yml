@@ -1,0 +1,35 @@
+name: Apply final renderer source
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/.sync-final/READY'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Rebuild and verify final source
+        shell: bash
+        run: |
+          cat .github/.sync-final/ui1 .github/.sync-b64/ui2 .github/.sync-final/ui3 .github/.sync-final/ui4 .github/.sync-final/ui5 | base64 -d > src/mvp-ui.js
+          cat .github/.sync-final/html1 | base64 -d > standalone.html
+          node --check src/mvp-ui.js
+          grep -q 'function rebuildPaperMap' src/mvp-ui.js
+          grep -q 'function drawPaperTextureModulation' src/mvp-ui.js
+          grep -q 'function drawEmbossAndBleed' src/mvp-ui.js
+          grep -q 'doc.background.mode = els.bgMode.value' src/mvp-ui.js
+          rm -rf .github/.sync-final .github/.sync-b64 .github/.sync-patch
+          rm -f .github/workflows/apply-sync.yml .github/workflows/apply-final-renderer.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat: add paper sampling background-aware edges and emboss bleed'
+          git push origin HEAD:main
