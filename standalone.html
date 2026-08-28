@@ -3,16 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>HandWriter · v0.2</title>
+  <title>HandWriter</title>
   <link rel="stylesheet" href="./assets/standalone.css" />
 </head>
 <body>
 <div class="shell">
   <div class="top">
     <div>
-      <div class="eyebrow">HANDWRITER V0.2</div>
+      <div class="eyebrow">HANDWRITER · MAIN</div>
       <h1>HandWriter Editor</h1>
-      <p>背景图 / 自定义画布尺寸 / 文本框生成 / 文本框整体调节 / 单字 Variant</p>
+      <p>文本框用于首轮排版，确认后解除编组；单字编辑与多字临时编组并存。</p>
     </div>
     <div class="fontbar">
       <select id="presetSelect" class="fontselect" aria-label="字体预设">
@@ -30,7 +30,7 @@
   <section class="controls">
     <div class="panel">
       <h2>文本内容</h2>
-      <p class="desc">在左侧画布上点击“新建文本框”，拖出一个框，在该范围内生成手写文字。单击文本框可整体编辑文本框，单击字符可编辑单字。</p>
+      <p class="desc">点击“新建文本框”后在画布上拖出一个区域，系统会在文本框中自动换行排版。确认后，文本框会解除编组，字符变成独立对象，可单字编辑或再次框选形成临时编组。</p>
       <textarea id="textInput" rows="4">今天下午我们一起去图书馆学习。
 同一个字，也应该有细微不同。
 如果文本很多，就放进一个文本框内自动换行。</textarea>
@@ -75,10 +75,10 @@
     <aside class="side">
       <section class="sec">
         <div class="head"><h2>选择</h2><span id="selectedCount">0 个字符</span></div>
-        <div id="selectionInfo" class="muted">默认选择文本框。点击字符进入单字编辑。空白处取消选择；文本框模式下可拖动/缩放文本框。</div>
+        <div id="selectionInfo" class="muted">单击字符可编辑单字；空白处拖拽可框选多个字形成临时编组；双击空白处可快速创建文本框。</div>
       </section>
       <section class="sec">
-        <div class="head"><h2>文本框</h2><span id="textboxState">未选择</span></div>
+        <div class="head"><h2>文本框排版</h2><span id="textboxState">未选择</span></div>
         <div class="fields">
           <div class="split2">
             <div class="field"><label>框内字号 <span class="sub" id="boxFontSizeText">56px</span></label><input id="boxFontSize" type="range" min="16" max="120" step="1" value="56"></div>
@@ -93,10 +93,14 @@
             <div class="field"><label>整体偏移 Y <span class="sub" id="boxOffsetYText">0px</span></label><input id="boxOffsetY" type="range" min="-100" max="100" step="1" value="0"></div>
           </div>
           <div class="split2">
-            <button id="regenerateBoxBtn" class="secondary">在框内生成文字</button>
-            <button id="deleteTextboxBtn" class="danger">删除文本框</button>
+            <button id="regenerateBoxBtn" class="secondary">更新框内预览</button>
+            <button id="confirmTextboxBtn" class="primary">确认并解除编组</button>
           </div>
-          <div class="meta"><span id="overflowInfo">未选择文本框</span><span id="textboxInfo">使用拖拽手柄缩放</span></div>
+          <div class="split2">
+            <button id="deleteTextboxBtn" class="danger">删除文本框</button>
+            <button id="clearSelectionBtn" class="secondary">清除选择</button>
+          </div>
+          <div class="meta"><span id="overflowInfo">未选择文本框</span><span id="textboxInfo">角点可拖拽，旋转手柄已放大</span></div>
         </div>
       </section>
       <section class="sec">
@@ -105,13 +109,13 @@
           <div class="field"><label for="colorInput">颜色 <span class="sub" id="colorText">#161616</span></label><input id="colorInput" type="color" value="#161616"></div>
           <div class="field"><label for="thicknessInput">粗细 <span class="sub" id="thicknessText">0.30px</span></label><input id="thicknessInput" type="range" min="0" max="3" step="0.05" value="0.30"></div>
           <div class="field"><label for="sizeInput">所选字号 <span class="sub" id="sizeText">56px</span></label><input id="sizeInput" type="range" min="16" max="120" step="1" value="56"></div>
-          <div class="meta"><span>单字颜色 / 粗细 / 大小</span><span id="styleHint">先选择字符</span></div>
+          <div class="meta"><span>单选时可换 Variant，多选时批量改属性</span><span id="styleHint">先选择字符</span></div>
           <button id="applyStyleBtn" class="secondary" disabled>应用到所选字符</button>
         </div>
       </section>
       <section class="sec">
         <div class="head"><h2>Variant 候选</h2><button id="rerollBtn" class="link" hidden>换一批</button></div>
-        <div id="candidateArea" class="muted">单击字符后显示 6 个候选。</div>
+        <div id="candidateArea" class="muted">单击单个字符后显示 6 个候选。</div>
       </section>
       <section class="sec actions">
         <button id="undoBtn" disabled>撤销</button>
@@ -121,7 +125,7 @@
       </section>
     </aside>
   </section>
-  <div class="tip"><span>上传背景图时，画布默认切换为图片像素尺寸；无背景时可使用自定义尺寸或 A4 等预设尺寸。</span><span>双击空白处也可直接创建默认文本框。</span></div>
+  <div class="tip"><span>工作流：拖出文本框 → 调整文本框排版 → 点击“确认并解除编组” → 单字编辑或再次框选多个字形成临时编组。</span><span>空白拖拽是多字框选；Delete 可删所选字符。</span></div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/opentype.js@1.3.4/dist/opentype.min.js"></script>
 <script src="./fonts/presets.js"></script>
