@@ -1,0 +1,151 @@
+diff --git a/src/mvp-ui.js b/src/mvp-ui.js
+index 94e883a..c5cfe95 100644
+--- a/src/mvp-ui.js
++++ b/src/mvp-ui.js
+@@ -23,6 +23,9 @@
+   };
+ 
+   const ctx = els.canvas.getContext('2d');
++  const paperCanvas = document.createElement('canvas');
++  const paperCtx = paperCanvas.getContext('2d', { willReadFrequently: true });
++  let paperMap = null;
+   let font = null;
+   let doc = createDocument(1240, 1754);
+   let selectedGlyphIds = new Set();
+@@ -38,7 +41,7 @@
+     return {
+       width, height, zoom: 0.35,
+       background: { image: null, mode: 'contain', opacity: 1, scale: 1, fileName: '' },
+-      noise: { amount: 0, size: 1, colorful: false, seed: 305419896 },
++      noise: { amount: 0, size: 1, colorful: false, seed: 0x12345678 },
+       glyphs: [],
+       draftTextboxes: []
+     };
+@@ -67,6 +70,7 @@
+     doc = target;
+     resetSelectionState();
+     interaction = { mode: null };
++    rebuildPaperMap();
+     draw();
+     syncUI();
+   }
+@@ -85,6 +89,7 @@
+     els.canvas.height = doc.height;
+     els.canvas.style.width = Math.round(doc.width * doc.zoom) + 'px';
+     els.canvas.style.height = Math.round(doc.height * doc.zoom) + 'px';
++    rebuildPaperMap();
+   }
+ 
+   function updateZoom(value) {
+@@ -144,10 +149,6 @@
+     return { cx: tb.x + tb.width / 2, cy: tb.y + tb.height / 2, w: tb.width, h: tb.height, angle: (tb.rotation || 0) * Math.PI / 180 };
+   }
+ 
+-  function shiftGlyphList(items, dx, dy) {
+-    for (const g of items || []) { g.x += dx; g.y += dy; }
+-  }
+-
+   function applyTextboxRotation(tb) {
+     const box = getTextboxRenderBox(tb);
+     const angleDeg = tb.rotation || 0;
+@@ -196,7 +197,6 @@
+       const adv = ((glyph.advanceWidth || units) / units) * size + tb.charGap;
+       if (x + adv > left + inner.w && x > left) { x = left; lineIndex++; baseline = top + lineIndex * lineHeight + ascent; }
+       if (baseline + size * 0.35 > top + inner.h) { overflowCount++; continue; }
+-
+       const occ = repeatCount.get(ch) || 0;
+       repeatCount.set(ch, occ + 1);
+       const instanceBias = Math.min(1.15, diversity * (0.22 + occ * 0.28));
+@@ -286,8 +286,72 @@
+     ctx.restore();
+   }
+ 
+-  function drawNoise() {
+-    // 全局噪点已弱化。当前噪点主要作用于文字层，用于让字与背景融合。
++  function drawBackgroundToContext(target, w, h) {
++    target.save();
++    target.fillStyle = '#fff';
++    target.fillRect(0, 0, w, h);
++    const bg = doc.background;
++    if (!bg.image) { target.restore(); return; }
++    target.globalAlpha = bg.opacity;
++    if (bg.mode === 'stretch') {
++      target.drawImage(bg.image, 0, 0, w, h);
++    } else {
++      const iw = bg.image.width, ih = bg.image.height;
++      const scale = bg.mode === 'cover' ? Math.max(w / iw, h / ih) : Math.min(w / iw, h / ih);
++      const finalScale = scale * bg.scale;
++      const dw = iw * finalScale, dh = ih * finalScale;
++      const dx = (w - dw) / 2, dy = (h - dh) / 2;
++      target.drawImage(bg.image, dx, dy, dw, dh);
++    }
++    target.restore();
++  }
++
++  function rebuildPaperMap() {
++    const sampleScale = Math.max(1, Math.ceil(Math.max(doc.width, doc.height) / 900));
++    const w = Math.max(32, Math.round(doc.width / sampleScale));
++    const h = Math.max(32, Math.round(doc.height / sampleScale));
++    paperCanvas.width = w;
++    paperCanvas.height = h;
++    drawBackgroundToContext(paperCtx, w, h);
++    const image = paperCtx.getImageData(0, 0, w, h);
++    const src = image.data;
++    const luminance = new Float32Array(w * h);
++    for (let i = 0; i < w * h; i++) {
++      const idx = i * 4;
++      luminance[i] = (0.299 * src[idx] + 0.587 * src[idx + 1] + 0.114 * src[idx + 2]) / 255;
++    }
++    const smooth = new Float32Array(w * h);
++    const contrast = new Float32Array(w * h);
++    for (let y = 0; y < h; y++) {
++      for (let x = 0; x < w; x++) {
++        let sum = 0, sum2 = 0, count = 0;
++        for (let oy = -1; oy <= 1; oy++) {
++          for (let ox = -1; ox <= 1; ox++) {
++            const xx = Math.max(0, Math.min(w - 1, x + ox));
++            const yy = Math.max(0, Math.min(h - 1, y + oy));
++            const val = luminance[yy * w + xx];
++            sum += val; sum2 += val * val; count++;
++          }
++        }
++        const mean = sum / count;
++        smooth[y * w + x] = mean;
++        contrast[y * w + x] = Math.sqrt(Math.max(0, sum2 / count - mean * mean));
++      }
++    }
++    const texture = new Float32Array(w * h);
++    for (let i = 0; i < w * h; i++) texture[i] = Core.clamp((luminance[i] - smooth[i]) * 3.5, -1, 1);
++    paperMap = { w, h, scale: sampleScale, luminance, smooth, texture, contrast };
++  }
++
++  function samplePaperWorld(x, y) {
++    if (!paperMap) return { lum: 1, tex: 0, contrast: 0 };
++    const px = Core.clamp(x / paperMap.scale, 0, paperMap.w - 1.001);
++    const py = Core.clamp(y / paperMap.scale, 0, paperMap.h - 1.001);
++    const x0 = Math.floor(px), y0 = Math.floor(py), x1 = Math.min(paperMap.w - 1, x0 + 1), y1 = Math.min(paperMap.h - 1, y0 + 1);
++    const tx = px - x0, ty = py - y0;
++    const idx = (xx, yy) => yy * paperMap.w + xx;
++    const bilerp = arr => Core.lerp(Core.lerp(arr[idx(x0, y0)], arr[idx(x1, y0)], tx), Core.lerp(arr[idx(x0, y1)], arr[idx(x1, y1)], tx), ty);
++    return { lum: bilerp(paperMap.luminance), tex: bilerp(paperMap.texture), contrast: bilerp(paperMap.contrast) };
+   }
+ 
+   function drawInkTexture(g) {
+@@ -340,24 +404,53 @@
+     ctx.restore();
+   }
+ 
+-  function drawGlyphBlendNoise(g) {
++  function drawPaperTextureModulation(g, paper) {
++    const amount = doc.noise.amount;
++    if (!amount) return;
++    const rng = Core.mulberry32(Core.mixSeed(g.inkSeed || g.variantSeed, 6113, 29));
++    const width = g.geo.width, height = g.geo.height;
++    const baseHex = g.fill || DEFAULT_COLOR;
++    ctx.save();
++    ctx.clip(g.geo.path);
++    const rows = Math.max(4, Math.round(height / 12));
++    for (let i = 0; i < rows; i++) {
++      const y = (i / Math.max(1, rows - 1)) * height;
++      const sample = samplePaperWorld(g.x + (rng() - 0.5) * width * 0.25, g.y - height / 2 + y);
++      const 
