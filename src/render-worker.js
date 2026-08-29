@@ -11,7 +11,7 @@ function ensureCanvas(width, height) {
 
 self.onmessage = event => {
   const data = event.data || {};
-  if (data.type !== 'compose' || !data.background || !data.staticText) return;
+  if (data.type !== 'cache-base' || !data.base) return;
   const width = Math.max(1, data.width | 0);
   const height = Math.max(1, data.height | 0);
   ensureCanvas(width, height);
@@ -20,10 +20,8 @@ self.onmessage = event => {
   ctx.globalCompositeOperation = 'source-over';
   ctx.filter = 'none';
   ctx.clearRect(0, 0, width, height);
-  ctx.drawImage(data.background, 0, 0);
-  ctx.drawImage(data.staticText, 0, 0);
-  if (typeof data.background.close === 'function') data.background.close();
-  if (typeof data.staticText.close === 'function') data.staticText.close();
+  ctx.drawImage(data.base, 0, 0);
+  if (typeof data.base.close === 'function') data.base.close();
   const bitmap = canvas.transferToImageBitmap();
-  self.postMessage({ type: 'composed', version: data.version, key: data.key, bitmap }, [bitmap]);
+  self.postMessage({ type: 'cached-base', version: data.version, key: data.key, bitmap }, [bitmap]);
 };
