@@ -3,6 +3,7 @@
   const state = window.HandWriterInkVariation = {
     localTone: 0.34,
     localStroke: 0.20,
+    sheen: 0.45,
     interactive: false
   };
 
@@ -44,6 +45,7 @@
   }
 
   function fusionStrength() { return clamp(readControl('noiseAmount', 0.55), 0, 1); }
+  function sheenStrength() { return clamp(readControl('sheenInput', state.sheen ?? 0.45), 0, 1); }
   function featherSize() { return clamp(readControl('noiseSize', 2), 1, 4); }
   function colorfulEnabled() { return readControl('noiseColor', 1) > 0; }
 
@@ -107,27 +109,41 @@
   // therefore produces a weak directional specular sheen under oblique light.
   function addSpecularSheen(ctx, path, rng, ink) {
     const fusion = fusionStrength();
-    if (fusion <= 0.03) return;
+    const sheen = sheenStrength();
+    if (fusion <= 0.03 || sheen <= 0.01) return;
     const extent = 190;
-    const angle = -0.58 + (rng() - 0.5) * 0.14;
-    const cx = extent * (0.36 + rng() * 0.28);
-    const cy = extent * (0.28 + rng() * 0.36);
-    const len = extent * 0.95;
+    const angle = -0.62 + (rng() - 0.5) * 0.18;
+    const cx = extent * (0.34 + rng() * 0.32);
+    const cy = extent * (0.24 + rng() * 0.40);
+    const len = extent * (0.92 + rng() * 0.12);
     const dx = Math.cos(angle) * len;
     const dy = Math.sin(angle) * len;
-    const grad = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
-    const a = 0.018 + fusion * 0.048;
-    const hi = { r: ink.r + 90, g: ink.g + 86, b: ink.b + 78 };
-    grad.addColorStop(0, 'rgba(255,255,255,0)');
-    grad.addColorStop(0.43, rgba(hi, a * 0.28));
-    grad.addColorStop(0.49, rgba(hi, a));
-    grad.addColorStop(0.55, rgba(hi, a * 0.24));
-    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    const a = (0.035 + fusion * 0.05) * (0.25 + sheen * 1.45);
+    const wide = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
+    const hi = { r: ink.r + 118, g: ink.g + 112, b: ink.b + 102 };
+    wide.addColorStop(0, 'rgba(255,255,255,0)');
+    wide.addColorStop(0.35, rgba(hi, a * 0.18));
+    wide.addColorStop(0.50, rgba(hi, a * 0.58));
+    wide.addColorStop(0.65, rgba(hi, a * 0.16));
+    wide.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.save();
     ctx.clip(path);
     ctx.globalCompositeOperation = 'screen';
-    ctx.fillStyle = grad;
-    ctx.fillRect(-20, -20, extent + 40, extent + 40);
+    ctx.fillStyle = wide;
+    ctx.fillRect(-24, -24, extent + 48, extent + 48);
+
+    if (sheen > 0.08) {
+      const thin = ctx.createLinearGradient(cx - dx * 0.9, cy - dy * 0.9, cx + dx * 0.9, cy + dy * 0.9);
+      thin.addColorStop(0, 'rgba(255,255,255,0)');
+      thin.addColorStop(0.46, rgba(hi, a * 0.22));
+      thin.addColorStop(0.495, rgba(hi, a * 1.18));
+      thin.addColorStop(0.535, rgba(hi, a * 0.20));
+      thin.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.filter = `blur(${0.12 + sheen * 0.45}px)`;
+      ctx.fillStyle = thin;
+      ctx.fillRect(-24, -24, extent + 48, extent + 48);
+      ctx.filter = 'none';
+    }
     ctx.restore();
   }
 
@@ -217,7 +233,29 @@
   };
 
   proto.stroke = function (...args) {
+    const path = args[0] instanceof Path2D ? args[0] : null;
     if (state.interactive && (this.globalAlpha < 0.34 || this.shadowBlur > 0.15)) return;
+
+    // The font outline itself can still look too heavy even when strokeWidth is near
+    // zero. For very small explicit glyph strokes, softly erode the filled outline
+    // along its boundary before drawing the requested hairline stroke. This makes
+    // the lower end of the thickness slider genuinely thinner instead of merely
+    // "no extra outline".
+    if (path && this.globalAlpha >= 0.85 && this.shadowBlur <= 0.15 && this.lineWidth <= 0.24) {
+      const target = Math.max(0.01, this.lineWidth || 0.01);
+      const thinness = clamp((0.24 - target) / 0.23, 0, 1);
+      if (thinness > 0.02) {
+        this.save();
+        this.globalCompositeOperation = 'destination-out';
+        this.globalAlpha = 0.16 + thinness * 0.42;
+        this.strokeStyle = 'rgba(0,0,0,1)';
+        this.lineWidth = 0.16 + thinness * 0.78;
+        this.lineCap = 'round';
+        this.lineJoin = 'round';
+        nativeStroke.call(this, path);
+        this.restore();
+      }
+    }
     return nativeStroke.apply(this, args);
   };
 
@@ -249,7 +287,6 @@
       if (this.id === 'canvas' && type === 'pointermove' && typeof listener === 'function') {
         let queued = false;
         let lastEvent = null;
-        const canvas = this;
         const wrapped = function (event) {
           lastEvent = event;
           if (queued) return;
@@ -258,9 +295,9 @@
             queued = false;
             const e = lastEvent;
             lastEvent = null;
-            if (e) listener.call(canvas, e);
+            if (e) listener.call(this, e);
           });
-        };
+        }.bind(this);
         return nativeCanvasAdd.call(this, type, wrapped, options);
       }
       return nativeCanvasAdd.call(this, type, listener, options);
@@ -284,12 +321,15 @@
   function installBestDefaults() {
     window.addEventListener('DOMContentLoaded', () => {
       const amount = document.getElementById('noiseAmount');
+      const sheen = document.getElementById('sheenInput');
       const size = document.getElementById('noiseSize');
       const color = document.getElementById('noiseColor');
       if (amount && Number(amount.value) === 0) amount.value = '0.55';
+      if (sheen && Number(sheen.value) === 0) sheen.value = '0.45';
       if (size && Number(size.value) < 2) size.value = '2';
       if (color) color.value = '1';
       if (amount) amount.dispatchEvent(new Event('input', { bubbles: true }));
+      if (sheen) sheen.dispatchEvent(new Event('input', { bubbles: true }));
       if (size) size.dispatchEvent(new Event('input', { bubbles: true }));
       if (color) color.dispatchEvent(new Event('input', { bubbles: true }));
     }, { once: true });
@@ -300,4 +340,5 @@
   installBestDefaults();
   bindRange('localToneInput', 'localToneText', 'localTone');
   bindRange('localStrokeInput', 'localStrokeText', 'localStroke');
+  bindRange('sheenInput', 'sheenText', 'sheen');
 })();
