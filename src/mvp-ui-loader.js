@@ -38,7 +38,7 @@
     return source.slice(0, drawStart) + layeredDraw + source.slice(nextFunction) + '\n//# sourceURL=handwriter-mvp-ui-layered.js\n';
   }
 
-  fetch(SOURCE, { cache: 'no-store' })
+  fetch(SOURCE, { cache: 'no-cache' })
     .then(response => {
       if (!response.ok) throw new Error('HTTP ' + response.status);
       return response.text();
