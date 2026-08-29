@@ -6,7 +6,8 @@
     chromaNoise: 0.22,
     softness: 0.24,
     feather: 0.30,
-    inkLift: 0.18
+    inkLift: 0.18,
+    interactive: false
   };
 
   const proto = CanvasRenderingContext2D.prototype;
@@ -15,6 +16,7 @@
   const pathSeeds = new WeakMap();
   let seedCounter = 0x51f15e;
   let applying = false;
+  let redrawQueued = false;
 
   function mulberry32(seed) {
     let a = seed >>> 0;
@@ -96,44 +98,24 @@
     return typeof ctx.fillStyle === 'string';
   }
 
-  function addSoftFoundation(ctx, path, rng, ink) {
-    const strength = realismStrength();
-    const size = featherSize();
-    const blur = 0.2 + state.softness * 0.72 + size * 0.08;
-    const passes = 1 + Math.round(strength * 1.6);
-    for (let i = 0; i < passes; i++) {
-      ctx.save();
-      ctx.filter = `blur(${blur + rng() * 0.2}px)`;
-      ctx.globalAlpha *= 0.014 + strength * 0.013;
-      ctx.translate((rng() - 0.5) * 0.42, (rng() - 0.5) * 0.42);
-      ctx.fillStyle = rgba(ink, 1);
-      nativeFill.call(ctx, path);
-      ctx.restore();
-    }
-  }
-
   function addToneVariation(ctx, path, rng) {
     const level = state.localTone;
     if (level <= 0) return;
     const strength = realismStrength();
     const extent = 190;
-    const patches = 4 + Math.round(level * 10);
+    const patches = 1 + Math.round(level * 2);
     ctx.save();
     ctx.clip(path);
     for (let i = 0; i < patches; i++) {
       const x = rng() * extent;
       const y = rng() * extent;
-      const radius = 12 + rng() * (28 + level * 52);
+      const radius = 18 + rng() * (26 + level * 34);
       const dark = rng() > 0.5;
-      const alpha = (0.012 + rng() * 0.03) * (0.7 + level * 1.35 + strength * 0.25);
+      const alpha = (0.012 + rng() * 0.022) * (0.8 + level + strength * 0.2);
       const grad = ctx.createRadialGradient(x, y, 0, x, y, radius);
-      if (dark) {
-        grad.addColorStop(0, `rgba(0,0,0,${alpha})`);
-        grad.addColorStop(1, 'rgba(0,0,0,0)');
-      } else {
-        grad.addColorStop(0, `rgba(246,244,239,${alpha * 0.68})`);
-        grad.addColorStop(1, 'rgba(246,244,239,0)');
-      }
+      const rgb = dark ? '20,20,20' : '246,244,239';
+      grad.addColorStop(0, `rgba(${rgb},${dark ? alpha : alpha * 0.68})`);
+      grad.addColorStop(1, `rgba(${rgb},0)`);
       ctx.fillStyle = grad;
       ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
     }
@@ -144,21 +126,17 @@
     if (!colorfulEnabled()) return;
     const strength = realismStrength();
     const extent = 190;
-    const count = 8 + Math.round(state.chromaNoise * 24 + strength * 16);
+    const count = 3 + Math.round(state.chromaNoise * 7 + strength * 4);
     ctx.save();
     ctx.clip(path);
     for (let i = 0; i < count; i++) {
       const x = rng() * extent;
       const y = rng() * extent;
-      const radius = 0.18 + rng() * (0.45 + strength * 0.45);
+      const radius = 0.22 + rng() * (0.38 + strength * 0.25);
+      const alpha = 0.012 + rng() * (0.012 + strength * 0.008);
       const pick = rng();
-      const alpha = 0.01 + rng() * (0.014 + strength * 0.014);
-      let c;
-      if (pick < 0.34) c = `rgba(150,95,88,${alpha})`;
-      else if (pick < 0.67) c = `rgba(78,105,138,${alpha})`;
-      else c = `rgba(108,122,92,${alpha * 0.9})`;
       ctx.beginPath();
-      ctx.fillStyle = c;
+      ctx.fillStyle = pick < 0.34 ? `rgba(150,95,88,${alpha})` : pick < 0.67 ? `rgba(78,105,138,${alpha})` : `rgba(108,122,92,${alpha * 0.9})`;
       ctx.arc(x, y, radius, 0, Math.PI * 2);
       ctx.fill();
     }
@@ -169,19 +147,19 @@
     const level = state.localStroke;
     if (level <= 0) return;
     const extent = 190;
-    const patches = 2 + Math.round(level * 7);
+    const patches = level < 0.55 ? 1 : 2;
     for (let i = 0; i < patches; i++) {
       const x = rng() * extent;
       const y = rng() * extent;
-      const rx = 12 + rng() * (20 + level * 34);
-      const ry = 9 + rng() * (18 + level * 28);
+      const rx = 16 + rng() * (18 + level * 26);
+      const ry = 12 + rng() * (15 + level * 22);
       ctx.save();
       ctx.beginPath();
       ctx.ellipse(x, y, rx, ry, rng() * Math.PI, 0, Math.PI * 2);
       ctx.clip();
-      ctx.globalAlpha *= 0.018 + level * 0.065;
-      ctx.strokeStyle = rgba(offset(ink, -6, -6, -6), 1);
-      ctx.lineWidth = 0.22 + level * (0.35 + rng() * 0.8);
+      ctx.globalAlpha *= 0.018 + level * 0.05;
+      ctx.strokeStyle = rgba(offset(ink, -5, -5, -5), 1);
+      ctx.lineWidth = 0.18 + level * (0.28 + rng() * 0.52);
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       nativeStroke.call(ctx, path);
@@ -191,67 +169,44 @@
 
   function addFeatherEdge(ctx, path, rng, ink) {
     const strength = realismStrength();
+    if (strength <= 0.01) return;
     const size = featherSize();
-    const feather = state.feather * (0.55 + strength * 0.65);
-    const passes = 2 + Math.round(size * 0.6);
-    for (let i = 0; i < passes; i++) {
-      ctx.save();
-      ctx.filter = `blur(${0.24 + i * 0.15 + size * 0.06}px)`;
-      ctx.globalAlpha *= (0.01 + strength * 0.013) * (1 - i / (passes + 1));
-      ctx.translate((rng() - 0.5) * (0.35 + feather), (rng() - 0.5) * (0.35 + feather));
-      ctx.strokeStyle = rgba(ink, 1);
-      ctx.lineWidth = 0.26 + i * 0.12 + size * 0.08;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      nativeStroke.call(ctx, path);
-      ctx.restore();
-    }
-  }
-
-  function addFadeEdge(ctx, path, rng) {
-    const strength = realismStrength();
-    const size = featherSize();
-    const passes = 2 + Math.round(strength * 2 + size * 0.3);
-    for (let i = 0; i < passes; i++) {
-      ctx.save();
-      ctx.filter = `blur(${0.45 + i * 0.28 + size * 0.12}px)`;
-      ctx.globalAlpha *= (0.018 + strength * 0.018) * (1 - i / (passes + 1));
-      ctx.translate((rng() - 0.5) * (0.55 + size * 0.1), (rng() - 0.5) * (0.55 + size * 0.1));
-      ctx.strokeStyle = 'rgba(245,243,238,1)';
-      ctx.lineWidth = 0.32 + i * 0.18 + size * 0.1;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      nativeStroke.call(ctx, path);
-      ctx.restore();
-    }
+    ctx.save();
+    ctx.globalAlpha *= 0.012 + strength * 0.012;
+    ctx.shadowBlur = 0.45 + size * 0.22;
+    ctx.shadowColor = rgba(ink, 0.34);
+    ctx.translate((rng() - 0.5) * 0.36, (rng() - 0.5) * 0.36);
+    ctx.strokeStyle = rgba(ink, 0.5);
+    ctx.lineWidth = 0.22 + size * 0.07 + state.feather * 0.12;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    nativeStroke.call(ctx, path);
+    ctx.restore();
   }
 
   proto.fill = function (...args) {
     const path = args[0] instanceof Path2D ? args[0] : null;
-    const shouldEnhance = eligible(this, path);
-    if (!shouldEnhance) return nativeFill.apply(this, args);
+    if (!eligible(this, path)) return nativeFill.apply(this, args);
 
     applying = true;
     try {
       const transform = this.getTransform();
       const spatial = ((Math.round(transform.e * 8) * 73856093) ^ (Math.round(transform.f * 8) * 19349663)) >>> 0;
       const rng = mulberry32((pathSeed(path) ^ spatial) >>> 0);
-      const originalFill = this.fillStyle;
-      const ink = realisticInk(originalFill, rng);
-
-      addSoftFoundation(this, path, rng, ink);
+      const ink = realisticInk(this.fillStyle, rng);
 
       this.save();
       this.fillStyle = rgba(ink, 1);
-      this.globalAlpha *= 0.84 + (1 - realismStrength()) * 0.045;
+      this.globalAlpha *= 0.86 + (1 - realismStrength()) * 0.035;
       const result = nativeFill.call(this, path, ...args.slice(1));
       this.restore();
 
-      addToneVariation(this, path, rng);
-      addChromaNoise(this, path, rng);
-      addStrokeVariation(this, path, rng, ink);
-      addFeatherEdge(this, path, rng, ink);
-      addFadeEdge(this, path, rng);
+      if (!state.interactive) {
+        addToneVariation(this, path, rng);
+        addChromaNoise(this, path, rng);
+        addStrokeVariation(this, path, rng, ink);
+        addFeatherEdge(this, path, rng, ink);
+      }
       return result;
     } finally {
       applying = false;
@@ -259,8 +214,13 @@
   };
 
   function requestRedraw() {
-    const zoom = document.getElementById('zoomInput');
-    if (zoom) zoom.dispatchEvent(new Event('input', { bubbles: true }));
+    if (redrawQueued) return;
+    redrawQueued = true;
+    requestAnimationFrame(() => {
+      redrawQueued = false;
+      const zoom = document.getElementById('zoomInput');
+      if (zoom) zoom.dispatchEvent(new Event('input', { bubbles: true }));
+    });
   }
 
   function bindRange(id, textId, key) {
@@ -276,6 +236,21 @@
     });
   }
 
+  function installInteractionFastPath() {
+    const canvas = document.getElementById('canvas');
+    if (!canvas) return;
+    canvas.addEventListener('pointerdown', () => { state.interactive = true; }, true);
+    const finish = () => {
+      if (!state.interactive) return;
+      state.interactive = false;
+      requestRedraw();
+    };
+    canvas.addEventListener('pointerup', finish, true);
+    canvas.addEventListener('pointercancel', finish, true);
+    window.addEventListener('pointerup', finish, true);
+  }
+
   bindRange('localToneInput', 'localToneText', 'localTone');
   bindRange('localStrokeInput', 'localStrokeText', 'localStroke');
+  installInteractionFastPath();
 })();
