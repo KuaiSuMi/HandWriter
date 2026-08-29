@@ -1,22 +1,21 @@
 'use strict';
 (function () {
   const state = window.HandWriterInkVariation = {
-    localTone: 0.35,
-    localStroke: 0.28,
-    chromaNoise: 0.22,
-    softness: 0.24,
-    feather: 0.30,
-    inkLift: 0.18,
+    localTone: 0.34,
+    localStroke: 0.20,
     interactive: false
   };
 
   const proto = CanvasRenderingContext2D.prototype;
   const nativeFill = proto.fill;
   const nativeStroke = proto.stroke;
+  const nativeCanvasAdd = HTMLCanvasElement.prototype.addEventListener;
   const pathSeeds = new WeakMap();
   let seedCounter = 0x51f15e;
   let applying = false;
   let redrawQueued = false;
+
+  function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
   function mulberry32(seed) {
     let a = seed >>> 0;
@@ -28,8 +27,6 @@
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
   }
-
-  function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
   function pathSeed(path) {
     let seed = pathSeeds.get(path);
@@ -46,138 +43,139 @@
     return el ? Number(el.value) : fallback;
   }
 
-  function realismStrength() {
-    return clamp(readControl('noiseAmount', 0.35), 0, 1);
-  }
-
-  function featherSize() {
-    return clamp(readControl('noiseSize', 1), 1, 4);
-  }
-
-  function colorfulEnabled() {
-    return readControl('noiseColor', 1) > 0;
-  }
+  function fusionStrength() { return clamp(readControl('noiseAmount', 0.55), 0, 1); }
+  function featherSize() { return clamp(readControl('noiseSize', 2), 1, 4); }
+  function colorfulEnabled() { return readControl('noiseColor', 1) > 0; }
 
   function parseColor(value) {
     if (typeof value !== 'string') return { r: 28, g: 27, b: 25 };
-    const hex = value.trim();
-    if (/^#[0-9a-f]{3}$/i.test(hex)) {
-      return { r: parseInt(hex[1] + hex[1], 16), g: parseInt(hex[2] + hex[2], 16), b: parseInt(hex[3] + hex[3], 16) };
+    const s = value.trim();
+    if (/^#[0-9a-f]{3}$/i.test(s)) {
+      return { r: parseInt(s[1] + s[1], 16), g: parseInt(s[2] + s[2], 16), b: parseInt(s[3] + s[3], 16) };
     }
-    if (/^#[0-9a-f]{6}$/i.test(hex)) {
-      return { r: parseInt(hex.slice(1, 3), 16), g: parseInt(hex.slice(3, 5), 16), b: parseInt(hex.slice(5, 7), 16) };
+    if (/^#[0-9a-f]{6}$/i.test(s)) {
+      return { r: parseInt(s.slice(1, 3), 16), g: parseInt(s.slice(3, 5), 16), b: parseInt(s.slice(5, 7), 16) };
     }
-    const m = hex.match(/rgba?\(\s*([\d.]+)[, ]+([\d.]+)[, ]+([\d.]+)/i);
+    const m = s.match(/rgba?\(\s*([\d.]+)[, ]+([\d.]+)[, ]+([\d.]+)/i);
     if (m) return { r: +m[1], g: +m[2], b: +m[3] };
     return { r: 28, g: 27, b: 25 };
   }
 
-  function rgba(rgb, alpha) {
-    return `rgba(${Math.round(clamp(rgb.r, 0, 255))},${Math.round(clamp(rgb.g, 0, 255))},${Math.round(clamp(rgb.b, 0, 255))},${alpha})`;
+  function rgba(c, a) {
+    return `rgba(${Math.round(clamp(c.r, 0, 255))},${Math.round(clamp(c.g, 0, 255))},${Math.round(clamp(c.b, 0, 255))},${a})`;
   }
 
-  function offset(rgb, dr, dg, db) {
-    return { r: rgb.r + dr, g: rgb.g + dg, b: rgb.b + db };
-  }
-
-  function realisticInk(baseColor, rng) {
-    const c = parseColor(baseColor);
-    const strength = realismStrength();
-    const lift = 10 + state.inkLift * 22 + strength * 5;
-    const warm = colorfulEnabled() ? (rng() - 0.35) * 4.5 : 0;
+  function realisticInk(base, rng) {
+    const c = parseColor(base);
+    const fusion = fusionStrength();
+    const lift = 9 + fusion * 13;
+    const warm = colorfulEnabled() ? (rng() - 0.42) * 5 : 0;
     return {
       r: c.r + lift + warm + 3,
-      g: c.g + lift + warm * 0.4 + 2,
+      g: c.g + lift + warm * 0.45 + 2,
       b: c.b + lift - warm * 0.55 + 1
     };
   }
 
   function eligible(ctx, path) {
-    if (!path || !(path instanceof Path2D) || applying) return false;
-    if (ctx.globalAlpha < 0.4) return false;
-    return typeof ctx.fillStyle === 'string';
+    return !!path && path instanceof Path2D && !applying && ctx.globalAlpha >= 0.4 && typeof ctx.fillStyle === 'string';
   }
 
-  function addToneVariation(ctx, path, rng) {
+  function addToneVariation(ctx, path, rng, ink) {
     const level = state.localTone;
     if (level <= 0) return;
-    const strength = realismStrength();
-    const extent = 190;
-    const patches = 1 + Math.round(level * 2);
+    const extent = 180;
+    const x = rng() * extent;
+    const y = rng() * extent;
+    const radius = 24 + rng() * (30 + level * 42);
+    const lighter = rng() > 0.46;
+    const alpha = 0.014 + level * 0.026;
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    const tone = lighter
+      ? { r: ink.r + 32, g: ink.g + 30, b: ink.b + 27 }
+      : { r: ink.r - 18, g: ink.g - 17, b: ink.b - 15 };
+    grad.addColorStop(0, rgba(tone, alpha));
+    grad.addColorStop(1, rgba(tone, 0));
     ctx.save();
     ctx.clip(path);
-    for (let i = 0; i < patches; i++) {
-      const x = rng() * extent;
-      const y = rng() * extent;
-      const radius = 18 + rng() * (26 + level * 34);
-      const dark = rng() > 0.5;
-      const alpha = (0.012 + rng() * 0.022) * (0.8 + level + strength * 0.2);
-      const grad = ctx.createRadialGradient(x, y, 0, x, y, radius);
-      const rgb = dark ? '20,20,20' : '246,244,239';
-      grad.addColorStop(0, `rgba(${rgb},${dark ? alpha : alpha * 0.68})`);
-      grad.addColorStop(1, `rgba(${rgb},0)`);
-      ctx.fillStyle = grad;
-      ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
-    }
+    ctx.fillStyle = grad;
+    ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
     ctx.restore();
   }
 
-  function addChromaNoise(ctx, path, rng) {
-    if (!colorfulEnabled()) return;
-    const strength = realismStrength();
+  // Ballpoint/gel ink commonly retains a smoother surface than paper fibres and
+  // therefore produces a weak directional specular sheen under oblique light.
+  function addSpecularSheen(ctx, path, rng, ink) {
+    const fusion = fusionStrength();
+    if (fusion <= 0.03) return;
     const extent = 190;
-    const count = 3 + Math.round(state.chromaNoise * 7 + strength * 4);
+    const angle = -0.58 + (rng() - 0.5) * 0.14;
+    const cx = extent * (0.36 + rng() * 0.28);
+    const cy = extent * (0.28 + rng() * 0.36);
+    const len = extent * 0.95;
+    const dx = Math.cos(angle) * len;
+    const dy = Math.sin(angle) * len;
+    const grad = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
+    const a = 0.018 + fusion * 0.048;
+    const hi = { r: ink.r + 90, g: ink.g + 86, b: ink.b + 78 };
+    grad.addColorStop(0, 'rgba(255,255,255,0)');
+    grad.addColorStop(0.43, rgba(hi, a * 0.28));
+    grad.addColorStop(0.49, rgba(hi, a));
+    grad.addColorStop(0.55, rgba(hi, a * 0.24));
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.save();
+    ctx.clip(path);
+    ctx.globalCompositeOperation = 'screen';
+    ctx.fillStyle = grad;
+    ctx.fillRect(-20, -20, extent + 40, extent + 40);
+    ctx.restore();
+  }
+
+  function addFiberRidge(ctx, path, rng, ink) {
+    const level = state.localStroke;
+    if (level <= 0) return;
+    ctx.save();
+    ctx.globalAlpha *= 0.014 + level * 0.025;
+    ctx.translate((rng() - 0.65) * 0.34, (rng() - 0.35) * 0.30);
+    ctx.strokeStyle = rgba({ r: ink.r - 16, g: ink.g - 15, b: ink.b - 13 }, 0.75);
+    ctx.lineWidth = 0.16 + level * 0.20;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    nativeStroke.call(ctx, path);
+    ctx.restore();
+  }
+
+  function addChromaMicroNoise(ctx, path, rng) {
+    if (!colorfulEnabled()) return;
+    const fusion = fusionStrength();
+    const count = 2 + Math.round(fusion * 3);
     ctx.save();
     ctx.clip(path);
     for (let i = 0; i < count; i++) {
-      const x = rng() * extent;
-      const y = rng() * extent;
-      const radius = 0.22 + rng() * (0.38 + strength * 0.25);
-      const alpha = 0.012 + rng() * (0.012 + strength * 0.008);
+      const x = rng() * 175;
+      const y = rng() * 175;
+      const r = 0.22 + rng() * 0.42;
+      const a = 0.008 + rng() * 0.012;
       const pick = rng();
       ctx.beginPath();
-      ctx.fillStyle = pick < 0.34 ? `rgba(150,95,88,${alpha})` : pick < 0.67 ? `rgba(78,105,138,${alpha})` : `rgba(108,122,92,${alpha * 0.9})`;
-      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = pick < 0.34 ? `rgba(145,98,91,${a})` : pick < 0.67 ? `rgba(82,105,132,${a})` : `rgba(104,119,94,${a})`;
+      ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();
   }
 
-  function addStrokeVariation(ctx, path, rng, ink) {
-    const level = state.localStroke;
-    if (level <= 0) return;
-    const extent = 190;
-    const patches = level < 0.55 ? 1 : 2;
-    for (let i = 0; i < patches; i++) {
-      const x = rng() * extent;
-      const y = rng() * extent;
-      const rx = 16 + rng() * (18 + level * 26);
-      const ry = 12 + rng() * (15 + level * 22);
-      ctx.save();
-      ctx.beginPath();
-      ctx.ellipse(x, y, rx, ry, rng() * Math.PI, 0, Math.PI * 2);
-      ctx.clip();
-      ctx.globalAlpha *= 0.018 + level * 0.05;
-      ctx.strokeStyle = rgba(offset(ink, -5, -5, -5), 1);
-      ctx.lineWidth = 0.18 + level * (0.28 + rng() * 0.52);
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      nativeStroke.call(ctx, path);
-      ctx.restore();
-    }
-  }
-
   function addFeatherEdge(ctx, path, rng, ink) {
-    const strength = realismStrength();
-    if (strength <= 0.01) return;
+    const fusion = fusionStrength();
+    if (fusion <= 0.02) return;
     const size = featherSize();
     ctx.save();
-    ctx.globalAlpha *= 0.012 + strength * 0.012;
-    ctx.shadowBlur = 0.45 + size * 0.22;
-    ctx.shadowColor = rgba(ink, 0.34);
-    ctx.translate((rng() - 0.5) * 0.36, (rng() - 0.5) * 0.36);
-    ctx.strokeStyle = rgba(ink, 0.5);
-    ctx.lineWidth = 0.22 + size * 0.07 + state.feather * 0.12;
+    ctx.globalAlpha *= 0.008 + fusion * 0.014;
+    ctx.shadowBlur = 0.35 + size * 0.18;
+    ctx.shadowColor = rgba(ink, 0.28);
+    ctx.translate((rng() - 0.5) * 0.28, (rng() - 0.5) * 0.28);
+    ctx.strokeStyle = rgba(ink, 0.46);
+    ctx.lineWidth = 0.16 + size * 0.045;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     nativeStroke.call(ctx, path);
@@ -186,31 +184,41 @@
 
   proto.fill = function (...args) {
     const path = args[0] instanceof Path2D ? args[0] : null;
+
+    // The main renderer creates several low-alpha auxiliary passes for bleed/noise.
+    // During direct manipulation these are skipped, then restored on pointer-up.
+    if (state.interactive && path && this.globalAlpha < 0.34) return;
     if (!eligible(this, path)) return nativeFill.apply(this, args);
 
     applying = true;
     try {
-      const transform = this.getTransform();
-      const spatial = ((Math.round(transform.e * 8) * 73856093) ^ (Math.round(transform.f * 8) * 19349663)) >>> 0;
+      const tr = this.getTransform();
+      const spatial = ((Math.round(tr.e * 4) * 73856093) ^ (Math.round(tr.f * 4) * 19349663)) >>> 0;
       const rng = mulberry32((pathSeed(path) ^ spatial) >>> 0);
       const ink = realisticInk(this.fillStyle, rng);
 
       this.save();
       this.fillStyle = rgba(ink, 1);
-      this.globalAlpha *= 0.86 + (1 - realismStrength()) * 0.035;
+      this.globalAlpha *= 0.89 - fusionStrength() * 0.035;
       const result = nativeFill.call(this, path, ...args.slice(1));
       this.restore();
 
       if (!state.interactive) {
-        addToneVariation(this, path, rng);
-        addChromaNoise(this, path, rng);
-        addStrokeVariation(this, path, rng, ink);
+        addToneVariation(this, path, rng, ink);
+        addSpecularSheen(this, path, rng, ink);
+        addFiberRidge(this, path, rng, ink);
+        addChromaMicroNoise(this, path, rng);
         addFeatherEdge(this, path, rng, ink);
       }
       return result;
     } finally {
       applying = false;
     }
+  };
+
+  proto.stroke = function (...args) {
+    if (state.interactive && (this.globalAlpha < 0.34 || this.shadowBlur > 0.15)) return;
+    return nativeStroke.apply(this, args);
   };
 
   function requestRedraw() {
@@ -236,21 +244,60 @@
     });
   }
 
+  function installPointerMoveThrottle() {
+    HTMLCanvasElement.prototype.addEventListener = function (type, listener, options) {
+      if (this.id === 'canvas' && type === 'pointermove' && typeof listener === 'function') {
+        let queued = false;
+        let lastEvent = null;
+        const canvas = this;
+        const wrapped = function (event) {
+          lastEvent = event;
+          if (queued) return;
+          queued = true;
+          requestAnimationFrame(() => {
+            queued = false;
+            const e = lastEvent;
+            lastEvent = null;
+            if (e) listener.call(canvas, e);
+          });
+        };
+        return nativeCanvasAdd.call(this, type, wrapped, options);
+      }
+      return nativeCanvasAdd.call(this, type, listener, options);
+    };
+  }
+
   function installInteractionFastPath() {
-    const canvas = document.getElementById('canvas');
-    if (!canvas) return;
-    canvas.addEventListener('pointerdown', () => { state.interactive = true; }, true);
+    document.addEventListener('pointerdown', e => {
+      if (e.target && e.target.id === 'canvas') state.interactive = true;
+    }, true);
     const finish = () => {
       if (!state.interactive) return;
       state.interactive = false;
       requestRedraw();
     };
-    canvas.addEventListener('pointerup', finish, true);
-    canvas.addEventListener('pointercancel', finish, true);
-    window.addEventListener('pointerup', finish, true);
+    document.addEventListener('pointerup', finish, true);
+    document.addEventListener('pointercancel', finish, true);
+    window.addEventListener('blur', finish);
   }
 
+  function installBestDefaults() {
+    window.addEventListener('DOMContentLoaded', () => {
+      const amount = document.getElementById('noiseAmount');
+      const size = document.getElementById('noiseSize');
+      const color = document.getElementById('noiseColor');
+      if (amount && Number(amount.value) === 0) amount.value = '0.55';
+      if (size && Number(size.value) < 2) size.value = '2';
+      if (color) color.value = '1';
+      if (amount) amount.dispatchEvent(new Event('input', { bubbles: true }));
+      if (size) size.dispatchEvent(new Event('input', { bubbles: true }));
+      if (color) color.dispatchEvent(new Event('input', { bubbles: true }));
+    }, { once: true });
+  }
+
+  installPointerMoveThrottle();
+  installInteractionFastPath();
+  installBestDefaults();
   bindRange('localToneInput', 'localToneText', 'localTone');
   bindRange('localStrokeInput', 'localStrokeText', 'localStroke');
-  installInteractionFastPath();
 })();
