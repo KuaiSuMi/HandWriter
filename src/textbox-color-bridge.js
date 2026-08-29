@@ -21,6 +21,7 @@
 
     const bridgeState = window.HandWriterTextboxStyle = {
       active: false,
+      color: colorInput.value || '#161616',
       thickness: Math.max(0.01, Number(thicknessInput.value) || 0.08)
     };
 
@@ -31,33 +32,27 @@
       return /排版中/.test(textboxState.textContent || '');
     }
 
-    // mvp-ui generates textbox glyph stroke width with Core.clamp(value, 0, 3).
-    // Remap only that narrow signature while a draft textbox is active, so the
-    // requested thickness is stored in preview glyphs and survives confirmation.
     Core.clamp = function (value, min, max) {
       if (bridgeState.active && min === 0 && max === 3 && Number.isFinite(value)) {
-        const desired = Math.max(0.01, Number(thicknessInput.value) || 0.01);
         const originalVariation = value - 0.22;
-        return nativeClamp(desired + originalVariation * 0.28, 0.01, 3);
+        return nativeClamp(bridgeState.thickness + originalVariation * 0.18, 0.01, 3);
       }
       return nativeClamp(value, min, max);
     };
 
     Core.jitterInk = function (hex, rng, amount, grayscaleOnly = true) {
       if (!bridgeState.active) return nativeJitterInk.call(this, hex, rng, amount, grayscaleOnly);
-      const activeColor = colorInput.value || hex;
-      return nativeJitterInk.call(this, activeColor, rng, amount, grayscaleOnly);
+      return nativeJitterInk.call(this, bridgeState.color || hex, rng, amount, grayscaleOnly);
     };
 
-    function refreshTextboxUi() {
-      const nowActive = textboxActive();
-      bridgeState.active = nowActive;
-      bridgeState.thickness = Math.max(0.01, Number(thicknessInput.value) || 0.01);
-      if (!nowActive) return;
-
+    function restoreTextboxStyleControls() {
+      if (!textboxActive()) return;
+      bridgeState.active = true;
       colorInput.disabled = false;
       thicknessInput.disabled = false;
-      if (colorText) colorText.textContent = colorInput.value;
+      colorInput.value = bridgeState.color;
+      thicknessInput.value = String(bridgeState.thickness);
+      if (colorText) colorText.textContent = bridgeState.color;
       if (thicknessText) thicknessText.textContent = bridgeState.thickness.toFixed(2) + 'px';
       if (styleScope) styleScope.textContent = '文本框预览样式';
       if (styleHint) styleHint.textContent = '颜色和粗细会立即作用于当前新建文本框';
@@ -69,21 +64,24 @@
     function relayoutTextboxPreview() {
       if (!textboxActive() || !boxOffsetX || relayoutQueued) return;
       bridgeState.active = true;
-      bridgeState.thickness = Math.max(0.01, Number(thicknessInput.value) || 0.01);
       relayoutQueued = true;
       requestAnimationFrame(() => {
         relayoutQueued = false;
         boxOffsetX.dispatchEvent(new Event('input', { bubbles: true }));
-        requestAnimationFrame(refreshTextboxUi);
+        restoreTextboxStyleControls();
+        requestAnimationFrame(restoreTextboxStyleControls);
       });
     }
 
     colorInput.addEventListener('input', () => {
-      if (colorText) colorText.textContent = colorInput.value;
+      if (!textboxActive()) return;
+      bridgeState.color = colorInput.value || bridgeState.color;
+      if (colorText) colorText.textContent = bridgeState.color;
       relayoutTextboxPreview();
     });
 
     thicknessInput.addEventListener('input', () => {
+      if (!textboxActive()) return;
       bridgeState.thickness = Math.max(0.01, Number(thicknessInput.value) || 0.01);
       if (thicknessText) thicknessText.textContent = bridgeState.thickness.toFixed(2) + 'px';
       relayoutTextboxPreview();
@@ -93,17 +91,17 @@
     const observer = new MutationObserver(() => {
       const active = textboxActive();
       bridgeState.active = active;
-      requestAnimationFrame(refreshTextboxUi);
-      // The first layout happens before textboxState changes to “排版中”.
-      // Re-layout once after activation so the initial draft also gets the user's
-      // color/thickness without requiring an extra manual adjustment.
-      if (active && !wasActive) relayoutTextboxPreview();
+      if (active && !wasActive) {
+        restoreTextboxStyleControls();
+        relayoutTextboxPreview();
+      } else if (active) {
+        restoreTextboxStyleControls();
+      }
       wasActive = active;
     });
     observer.observe(textboxState, { childList: true, subtree: true, characterData: true });
 
-    document.addEventListener('pointerup', () => requestAnimationFrame(refreshTextboxUi), true);
-    document.addEventListener('click', () => requestAnimationFrame(refreshTextboxUi), true);
-    requestAnimationFrame(refreshTextboxUi);
+    document.addEventListener('pointerup', () => requestAnimationFrame(restoreTextboxStyleControls), true);
+    document.addEventListener('click', () => requestAnimationFrame(restoreTextboxStyleControls), true);
   });
 })();
