@@ -105,45 +105,72 @@
     ctx.restore();
   }
 
-  // Ballpoint/gel ink commonly retains a smoother surface than paper fibres and
-  // therefore produces a weak directional specular sheen under oblique light.
+  // Gel/ballpoint ink has a smoother film than the surrounding paper. Under
+  // oblique light it produces narrow directional highlights. Keep this control
+  // independent from paper-fusion strength: 0 means matte ink, 1 is deliberately
+  // obvious so the full slider range is visually useful.
   function addSpecularSheen(ctx, path, rng, ink) {
-    const fusion = fusionStrength();
     const sheen = sheenStrength();
-    if (fusion <= 0.03 || sheen <= 0.01) return;
-    const extent = 190;
-    const angle = -0.62 + (rng() - 0.5) * 0.18;
-    const cx = extent * (0.34 + rng() * 0.32);
-    const cy = extent * (0.24 + rng() * 0.40);
-    const len = extent * (0.92 + rng() * 0.12);
-    const dx = Math.cos(angle) * len;
-    const dy = Math.sin(angle) * len;
-    const a = (0.035 + fusion * 0.05) * (0.25 + sheen * 1.45);
-    const wide = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
-    const hi = { r: ink.r + 118, g: ink.g + 112, b: ink.b + 102 };
-    wide.addColorStop(0, 'rgba(255,255,255,0)');
-    wide.addColorStop(0.35, rgba(hi, a * 0.18));
-    wide.addColorStop(0.50, rgba(hi, a * 0.58));
-    wide.addColorStop(0.65, rgba(hi, a * 0.16));
-    wide.addColorStop(1, 'rgba(255,255,255,0)');
+    if (sheen <= 0.005) return;
+
+    // Typical glyphs here are 30-120 px wide. The previous 190 px single band could
+    // miss small glyphs entirely, so draw several deterministic diagonal bands.
+    const extent = 132;
+    const angle = -0.66 + (rng() - 0.5) * 0.14;
+    const dirX = Math.cos(angle);
+    const dirY = Math.sin(angle);
+    const hi = {
+      r: clamp(ink.r + 150, 0, 255),
+      g: clamp(ink.g + 144, 0, 255),
+      b: clamp(ink.b + 132, 0, 255)
+    };
+    const broadPeak = 0.035 + sheen * 0.18;
+    const ridgePeak = 0.07 + sheen * 0.42;
+    const shifts = [0.22, 0.48, 0.74];
+
     ctx.save();
     ctx.clip(path);
     ctx.globalCompositeOperation = 'screen';
-    ctx.fillStyle = wide;
-    ctx.fillRect(-24, -24, extent + 48, extent + 48);
 
-    if (sheen > 0.08) {
-      const thin = ctx.createLinearGradient(cx - dx * 0.9, cy - dy * 0.9, cx + dx * 0.9, cy + dy * 0.9);
+    for (let i = 0; i < shifts.length; i++) {
+      const center = extent * shifts[i] + (rng() - 0.5) * 7;
+      const cx = center;
+      const cy = extent * (0.30 + i * 0.18);
+      const len = extent * 0.78;
+      const dx = dirX * len;
+      const dy = dirY * len;
+
+      const wide = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
+      wide.addColorStop(0, 'rgba(255,255,255,0)');
+      wide.addColorStop(0.38, rgba(hi, broadPeak * 0.10));
+      wide.addColorStop(0.50, rgba(hi, broadPeak));
+      wide.addColorStop(0.62, rgba(hi, broadPeak * 0.08));
+      wide.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = wide;
+      ctx.fillRect(-18, -18, extent + 36, extent + 36);
+
+      const thin = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
       thin.addColorStop(0, 'rgba(255,255,255,0)');
-      thin.addColorStop(0.46, rgba(hi, a * 0.22));
-      thin.addColorStop(0.495, rgba(hi, a * 1.18));
-      thin.addColorStop(0.535, rgba(hi, a * 0.20));
+      thin.addColorStop(0.472, rgba(hi, ridgePeak * 0.08));
+      thin.addColorStop(0.498, rgba(hi, ridgePeak));
+      thin.addColorStop(0.524, rgba(hi, ridgePeak * 0.07));
       thin.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.filter = `blur(${0.12 + sheen * 0.45}px)`;
+      ctx.filter = `blur(${0.10 + sheen * 0.22}px)`;
       ctx.fillStyle = thin;
-      ctx.fillRect(-24, -24, extent + 48, extent + 48);
+      ctx.fillRect(-18, -18, extent + 36, extent + 36);
       ctx.filter = 'none';
     }
+
+    // A tiny warm shoulder makes the reflection read as ink gloss rather than a
+    // white painted stripe, especially on dark grey/blue-black handwriting.
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.025 + sheen * 0.055;
+    ctx.strokeStyle = rgba({ r: hi.r, g: hi.g - 5, b: hi.b - 12 }, 1);
+    ctx.lineWidth = 0.42 + sheen * 0.34;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.translate(-0.28, -0.22);
+    nativeStroke.call(ctx, path);
     ctx.restore();
   }
 
