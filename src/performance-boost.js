@@ -85,13 +85,20 @@
     const proto = CanvasRenderingContext2D.prototype;
     const nativeArc = proto.arc;
     proto.arc = function (x, y, radius, startAngle, endAngle, counterclockwise) {
+      // Ink texture uses many sub-2px dots. They are visually irrelevant while
+      // dragging but expensive across hundreds of glyphs. Handles are much larger.
       if (ink.interactive && radius < 2.25) return;
       return nativeArc.call(this, x, y, radius, startAngle, endAngle, counterclockwise);
     };
   }
 
+  let coreInstalled = false;
   function install() {
+    // Range handlers are assigned by mvp-ui, which can now be loaded asynchronously
+    // through mvp-ui-loader. Re-running this part is intentional and idempotent.
     installRangeThrottles();
+    if (coreInstalled) return;
+    coreInstalled = true;
     installRangeFastPreview();
     installCandidateDomFreeze();
     installTinyInkDetailSkip();
@@ -99,4 +106,5 @@
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
   else install();
+  window.addEventListener('handwriter:editor-ready', install);
 })();
