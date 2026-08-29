@@ -11,6 +11,8 @@
     square: { width: 2048, height: 2048 },
     hd: { width: 1920, height: 1080 }
   };
+  const GEOMETRY_CACHE_LIMIT = 900;
+  const geometryCache = new Map();
 
   function mulberry32(seed) {
     let a = seed >>> 0;
@@ -166,6 +168,13 @@
   }
 
   function geometry(font, char, fontSize, seed, strength, diversityBias) {
+    const cacheKey = `${char}|${fontSize}|${seed >>> 0}|${Number(strength).toFixed(5)}|${Number(diversityBias || 0).toFixed(4)}|${font.unitsPerEm || 1000}`;
+    const cached = geometryCache.get(cacheKey);
+    if (cached) {
+      geometryCache.delete(cacheKey);
+      geometryCache.set(cacheKey, cached);
+      return cached;
+    }
     const glyph = font.charToGlyph(char);
     const units = font.unitsPerEm || 1000;
     const ascent = (font.ascender || units * 0.8) / units * fontSize;
@@ -195,11 +204,16 @@
     const width = Math.max(adv + pad * 2, wb.maxX + pad, 4);
     const height = Math.max(baselineYLocal + descent + pad, wb.maxY + pad, ascent + descent + pad * 2, 4);
     const pathData = svg(commands);
-    return { pathData, path: new Path2D(pathData), width, height, advance: adv, glyphIndex: glyph.index, signature: model.signature, baselineYLocal };
+    const result = { pathData, path: new Path2D(pathData), width, height, advance: adv, glyphIndex: glyph.index, signature: model.signature, baselineYLocal };
+    Object.defineProperty(result, 'toJSON', { value: () => null, enumerable: false });
+    geometryCache.set(cacheKey, result);
+    if (geometryCache.size > GEOMETRY_CACHE_LIMIT) geometryCache.delete(geometryCache.keys().next().value);
+    return result;
   }
 
   function ensureGeo(font, g) {
-    if (!g.geo || g.geoSeed !== g.variantSeed || g.geoStrength !== g.warpStrength || g.geoBias !== g.instanceBias || g.geoSize !== g.fontSize) {
+    const pathBroken = !!g.geo && (!(g.geo.path instanceof Path2D) || typeof g.geo.pathData !== 'string');
+    if (!g.geo || pathBroken || g.geoSeed !== g.variantSeed || g.geoStrength !== g.warpStrength || g.geoBias !== g.instanceBias || g.geoSize !== g.fontSize) {
       g.geo = geometry(font, g.char, g.fontSize, g.variantSeed, g.warpStrength, g.instanceBias);
       g.geoSeed = g.variantSeed;
       g.geoStrength = g.warpStrength;
